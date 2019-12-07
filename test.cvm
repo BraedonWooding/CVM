@@ -1,0 +1,85 @@
+// everything you'll need is included by default
+// currently PC can only be a single file
+
+// We can use struct tags to give us free functions!!
+// For example LinkedList comes with 'append'
+// I won't use it for the sake of showing you some stuff
+// but you can.
+struct(LinkedList) Node<T> {
+    data: T,
+    // pointers go before
+    next: *Node<T>
+}
+
+// Container really comes with nothing
+// but it helps with printing.
+struct(Container) List<T> {
+    head: *Node<T>,
+    tail: *Node<T>
+}
+
+// Variables use id : type = value
+// You can use := to infer based on right type
+// Inference isn't smart
+// Functions can be defined inline but aren't closures
+// (I may add closures in the future)
+fn<T> find_odd(list: List<T>) -> List<T> {
+    // everything default initialised by default
+    // you can use '---' to force uninitialisation
+    // C initialisation { } works as normal
+    ret : List<T>;
+
+    // dot for everything we'll figure out the right one
+    cur := list.head;
+
+    while cur {
+        if cur.data % 2 != 0 {
+            // found odd
+            // you don't need '<>' if it can be seen from given
+            // values (just standard unification)
+            appendList<T>(&ret, cur.data);
+        }
+        cur = cur.next;
+    }
+
+    return ret;
+}
+
+fn<T> appendList(list: *List<T>, val: T) {
+    if !list.head {
+        // 'new' => 'malloc'
+        // you can use malloc if you really want
+        // but often 'new' will look cleaner
+        list.head = list.tail = new *Node<T> { val };
+    } else {
+        list.tail = list.tail.next = new *Node<T> { val };
+    }
+}
+
+// Arrays are very different since they need a defined length
+// so always use pointers for the typical function array
+// unless you want statically allocated array
+// Pointers are smart and won't let you access out of bounds!
+fn main(argc: int, argv: **char) -> int {
+    list : List(int);
+
+    // 'read' can help reading in multiple ints
+    // we don't actually need the type here...
+    // it's smart enough to type infer it from usage
+    // but by specifying it we are just making the code clearer
+    // read also works with strings
+    while let i := read<int>(stdin) {
+        appendList(list, i);
+    }
+
+    output := findOdd(list);
+    // we can use 'print' to print complex stuff
+    // note: we can use '%' and it'll figure out the types
+    // and replace it with the right printf string
+    // When printing a list it'll print a simpler format of it
+    // so that it fits on a single line
+    // If you want the nice pretty print you can use pretty_print
+    print("Original: %\nOdd Elements: %\n", list, output);
+
+    return 0;
+}
