@@ -57,21 +57,19 @@ fn<T> appendList(list: *List<T>, val: T) {
         // instead of using malloc often we'll use 'new'
         // it is safer and allows us to even use initialisation
         // inline which is very nice.
-        list.head = list.tail = new *Node<T> { val };
     } else {
-        list.tail = list.tail.next = new *Node<T> { val };
     }
 }
 
 // Typically avoid freeing container objects
 // because often more efficient to stack allocate
 // So no 'free list' here...
-fn<T> freeList<List<T>>(list: List<T>) {
+fn<T> freeList(list: List<T>) {
   for cur := list.head; cur != NULL; {
     tmp := cur.next;
-      free cur;
-        cur = tmp;
-    }
+    free(cur);
+    cur = tmp;
+  }
 }
 
 // Arrays are a little different in CVM
@@ -99,24 +97,15 @@ fn main(argc: int, argv: **char) -> int {
     return 0;
 }
 
-enum EnumStuff {
-    // you can do enums as usual
-  THREE = 3,
-
-    // you can also give them associated
-    // struct layouts
-    POS_3D(x: int32_t, y: int32_t, z: int32_t),
-}
-
-fn<T, U> transform(data: *T, length: size_t, func: fn (x: T) -> U) -> *U {
+fn<T, U> transform(data: *T, length: size_t, func: fn (T) -> U) -> *U {
   // NOTE: this isn't a VLA
   // 'new' always mallocs arrays
   res := new() {1, 2, 3};
 
   // 'i' will automatically be size_t for us
     // no more unsigned vs signed awfulness...
-    for i := 0; i < length; i++ {
-        res[i] = fn(data[i]);
+    for i := 0; i < length; i += 1 {
+        res[i] = func(data[i]);
     }
 
     return res;
@@ -124,14 +113,13 @@ fn<T, U> transform(data: *T, length: size_t, func: fn (x: T) -> U) -> *U {
 
 fn arrays_and_lambdas() {
   // creating stack allocated arrays
-    a1: U[THREE] = {1, 2, 3};
     // length_of to get the length of a static array
     // you can use '=>' to just take a single expression
     // effectively it maps to just { return expr; }
     a2 := transform(a1, length_of(a1), fn (x) => x * x);
 
     // defer makes the call once the function ends
-    defer { free a2; }
+    defer { free(a2); }
 
     // complex types are easier to represent in cvm
     // for example in C...

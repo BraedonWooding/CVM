@@ -5,7 +5,6 @@ use log::{info, trace, warn};
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Postfix {
-    None,
     u8,
     u16,
     u32,
@@ -176,7 +175,7 @@ impl<'a> Lexer<'a> {
             num.push(match self.chars.peek() {
                 Some(c) if !c.is_digit(base) => break,
                 None => break,
-                Some(c) => self.next().unwrap()
+                Some(_) => self.next().unwrap()
             });
         }
         num
@@ -184,23 +183,24 @@ impl<'a> Lexer<'a> {
 
     fn parse_num(&mut self, start: char) -> Result<TokenKind, ErrorToken> {
         let mut num = start.to_string();
-        let mut found_dot = false;
-        let mut found_exp = false;
-
         num += &self.parse_simple_num(10);
+        let mut postfix_guess = Postfix::i32;
+
         if self.chars.peek() == Some(&'.') {
             num.push('.');
             self.move_next();
             num += &self.parse_simple_num(10);
+            postfix_guess = Postfix::f64;
         }
         if self.chars.peek() == Some(&'e') || self.chars.peek() == Some(&'E') {
             num.push('e');
             self.move_next();
             match self.chars.peek() {
-                Some(c) if *c == '+' || *c == '-' => { self.move_next(); num.push(*c); },
+                Some(c) if *c == '+' || *c == '-' => { num.push(*c); self.move_next(); },
                 _ => {}
             }
             num += &self.parse_simple_num(10);
+            postfix_guess = Postfix::f64;
         }
 
         // postfix parsing
@@ -252,8 +252,7 @@ impl<'a> Lexer<'a> {
                 }
             },
             // default postfix
-            _ if found_dot || found_exp => Postfix::f64,
-            _ => Postfix::i32
+            _ => postfix_guess
         };
  
         match self.chars.peek() {
@@ -264,7 +263,7 @@ impl<'a> Lexer<'a> {
             _ => {}
         }
 
-        Ok(TokenKind::Number(num, Postfix::None))
+        Ok(TokenKind::Number(num, postfix))
     }
 
     fn valid_identifier_continuer(c: char) -> bool {
@@ -446,7 +445,7 @@ impl<'a> Iterator for Lexer<'a> {
             Some('i') if self.matches("f") => TokenKind::If,
             Some('i') if self.matches("s") => TokenKind::Is,
             Some('w') if self.matches("hile") => TokenKind::While,
-            Some('d') if self.matches("defer") => TokenKind::Defer,
+            Some('d') if self.matches("efer") => TokenKind::Defer,
             Some('f') if self.matches("or") => TokenKind::For,
             Some('f') if self.matches("n") => TokenKind::Function,
             Some('s') if self.matches("truct") => TokenKind::Struct,

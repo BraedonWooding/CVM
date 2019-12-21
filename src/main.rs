@@ -46,7 +46,7 @@ fn main() -> std::io::Result<()> {
             // TODO:
         },
         ("dev", Some(sub_matches)) => {
-            let filename = matches.value_of("INPUT").unwrap();
+            let filename = sub_matches.value_of("INPUT").unwrap();
             let text = fs::read_to_string(filename)?;
             let lexer = Lexer::new(&text);
             if sub_matches.is_present("tokens") {

@@ -67,26 +67,26 @@ atom ::= '(' conditional ')'
        | sizeof // maybe alignof??
        | int | flt | string | char | 'null' | 'true' | 'false'
        | '---' // uninitialised signifier
-       | 'let' assignment
+       | 'let' expr
        | function
 
-sizeof ::= 'sizeof' [ '<' type? '>' ] '(' expr? ')'
+sizeof ::= 'sizeof' [ '<' type? '>' ] '(' conditional? ')'
 
-func_call ::= atom [ '.<' type? { ',' type } ','? '>' ] '(' expr_list ')'
+func_call ::= atom [ '.<' type? { ',' type } ','? '>' ] '(' conditional? {',' conditional} ','? ')'
 
 // in reality we'll fold multiple indexes
 // into the same expression (same with calls)
 // makes analysis and codegen easier
-index ::= atom '[' expr ']'
+index ::= atom '[' conditional ']'
 
-if ::= 'if' conditional block ('else if' expr block)* ['else' block]
+if ::= 'if' conditional block ('else if' conditional block)* ['else' block]
 
-block ::= '{' {expr ';'} '}'
+block ::= '{' { expr ';'} '}'
 
 while ::= 'while' conditional block
 
 // add foreach
-for ::= 'for' expr? ';' conditional? ';' expr? block
+for ::= 'for' conditional? ';' conditional? ';' conditional? block
 
 defer ::= 'defer' block
 
@@ -125,12 +125,14 @@ multiplicative ::= unary
 
 assignment ::= (unary [':' type?] ('*' | '/' | '%' | '+' | '-' | '<<' | '>>' | '&' | '^' | '|') '=')+ conditional
 
-expr ::= [ 'return' ] conditional
+statement ::= [ 'return' ] conditional
+            | while
+            | defer
+            | for
+            | if
+
+expr ::= conditional
        | assignment
-       | while
-       | defer
-       | for
-       | if
 
 // allows optional trailing comma
 idList ::= id {',' id} ','?
