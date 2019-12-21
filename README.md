@@ -95,7 +95,8 @@ fn<T> find_odd(list: List<T>) -> List<T> {
             // found odd
             // you don't need '<>' if it can be seen from given
             // values (just standard unification)
-            appendList<T>(&ret, cur.data);
+            // to use it with functions you need a '.'
+            appendList.<T>(&ret, cur.data);
         }
         cur = cur.next;
     }
@@ -110,7 +111,7 @@ fn<T> appendList(list: *List<T>, val: T) {
     // you can use malloc<u8>(bytes); to allocate bytes
     newNode : *Node<T> = malloc();
     // initialiser lists casted to structures work
-    *newNode = (Node<T>) { .data = val };
+    *newNode = new Node<T> { .data = val };
     if !list.head {
         list.head = list.tail = newNode;
     } else {
@@ -162,17 +163,6 @@ fn main(argc: int, argv: **char) -> int {
 ### A bunch of miscellaneous stuff
 
 ```c
-// 
-fn<List<T>> create(args: *T, len: int) -> List<T> {
-    // note the pointer else it won't malloc the node
-    for i := 0; i < len; i++ {
-        
-    }
-    nodes := create<*Node<T>>(args);
-    // new won't malloc unless '*'
-    return new List<T> { .head = head(nodes), .tail = tail(nodes) }
-}
-
 // you can give no args (equivalent to (void) not to ())
 // and you can give no return type for main (equivalent to int + return 0)
 fn main() {
@@ -201,15 +191,122 @@ fn main() {
     // we have bool types (will be translated to either stdbool.h or just int dependent
     // upon settings)
     tautology: bool = true;
- 
-    // this doesn't actually translate to C it just says
-    // IntList list = createIntList(1, 2, 3);
-    list := create<List<int>>((int[3]){1, 2, 3}, 3);
+
+    // casting is done through fn<Result, In> cast(in: In) -> Result
+    // and is used like cast.<In, Result>(in)
+    // how the casting occurs behind the scenes is a compiler thing
+    integer := 4;
+
+    // NOTE: we can infer the type of the integer...
+    flt := cast.<float>(integer);
+
+    // and we can utilise type inference to allow casting to become obvious
+    one := 1;
+
+    // i.e. the following wouldn't compile
+    // half := one / 2.0;
+    // but the following would (and it would convert the int to a float)
+    half := cast(one) / 2.0;
+
+    // this does mean that no implicit casts exist
+    // OUTSIDE of widening integers/floats i.e.
+    small: u8 = 2;
+    large: u16 = 4000;
+    // OK!
+    sum := small + large;
+
+    // but yes... no other conversions exist so no void * to pointers
+    // no integers to floats... no signed to unsigned (or unsigned to signed)!
 }
 
 // sizeof has a weird definition it is effectively
 // the '_' is because we don't actaully care about the arg
 // it is just a way to infer T
+// i.e. you can either do sizeof(my_arg) or sizeof<Type>()
+///     (technically you can do both at the sametime i.e. sizeof<Type>(my_arg))
 sizeof : fn<T> (_ : T = default) -> usize;
 ```
 
+## Features coming soon
+
+> These features are still in the specification/idea stage
+
+### Enums
+
+```c
+// enums work as expect
+enum Animals {
+    DOG, // will be 0
+    CAT, // will be 1
+    BAT = 9, // override
+    WOLF, // will be 10
+}
+
+fn print_animal(animal: Animal) {
+    switch (animal) {
+        case DOG: case WOLF: {
+            printf("Woof\n");
+        }
+        // ... so on
+    }
+}
+
+// NOTE: enums are also utilised in unions (as shown in Union section)
+```
+
+### Unions
+
+```c
+// unions are actually implemented as algebraic data types
+// under the hood.  Another term for them is 'tagged unions'
+// i.e. if you put an int inside a union you CAN'T take a float out!
+union Data {
+    // we support rust styled types
+    // i.e. i32 == int32_t and usize == size_t
+    // NOTE: int == int_fast32_t and long = int_fast64_t and so on...
+    // (for uint and ulong and short/ushort)
+    INT = (integer: i32),
+    FLT = (decimal: f32),
+    STR = (string: *char, len: usize) // NOTE: char is always unsigned
+}
+
+fn print_data(data: Data) {
+    switch (data) {
+        case INT: {
+            printf("%d\n", data.integer);
+        }
+        case FLT: {
+            printf("%f\n", data.decimal);
+        }
+        case STR: {
+            printf("%.*s\n", data.len, data.string);
+        }
+    }
+}
+
+fn main() {
+    // you construct them through this way
+    print_data(new Data { .INT = { 5 } }); // '5'
+}
+```
+
+Downsides currently are that they don't really have a lot of interaction with generics and no pattern matching makes them bit of a pain in cases...
+
+You can force a change of type through:
+
+```c
+union Binary32Float {
+    BINARY = (rep: i32),
+    FLOAT  = (val: f32)
+}
+
+fn fltToData(flt: f32) => new Binary32Float { .FLOAT = { flt } };
+fn printRep(data: Binary32Float) {
+    // all unions have a '_type' field
+    // and we can change the type explicitly this way
+    data._type = BINARY;
+    print("{}", data.rep);
+}
+```
+
+There is a bit of compiler linting making you have to check the type before you are gonna use it (unless you explicitly set it).  If you try to print it out it'll just print out the type!

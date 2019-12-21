@@ -28,7 +28,7 @@ topLevel ::= struct | function
 
 struct ::= 'struct' id ['<' idList '>'] ['is' '(' idList ')'] '{' declList '}'
 
-function ::= 'fn' ['<' idList '>'] id '(' declList ')' [ '->' type ] (block | '=>' conditional)
+function ::= 'fn' ['<' idList '>'] id? '(' declList ')' [ '->' type ] (block | '=>' conditional)
 
 // Note: atleast one of type or conditional has to exist
 decl ::= id ':' type? '=' conditional
@@ -38,8 +38,10 @@ decl ::= id ':' type? '=' conditional
 type ::= type '[' conditional ']'
        | '*' type
        | '(' type ')'
-       | id [ '<' type? { ',' type } ','? '>' ]
-       | 'fn' id? '(' id [':' type] { ',' id [':' type] } ','? ')'
+       | id gen_types?
+       | 'fn' gen_types? id? '(' [ type { ',' type } ','? ] ')'
+
+gen_types ::= '<' [ type { ',' type } ','? ] '>'
 
 // recursive types are ew
 // so we avoid them by putting pointers
@@ -48,16 +50,18 @@ type ::= type '[' conditional ']'
 // which is honestly fine (we can't really avoid it)
 type ::= {'*'} id ('[' conditional ']') ['<' type '>']
 
-new ::= 'new' type initialisation?
+new ::= 'new' [ '.' '<' type '>'] initialisation?
 
 init_single ::= ['.' id '='] conditional
 initialisation ::= '{' [ init_single (',' init_single)* ','? ] '}'
 
-unary ::= { '!' | '*' | '&' | '+' | '-' | '(' type ')' } atom
+unary ::= { '!' | '*' | '&' | '+' | '-' } atom
 
 atom ::= '(' conditional ')'
-       | id [ '<' type? { ',' type } ','? '>' ]
+       | id
+       | atom '.' id
        | new
+       | 'cast' ['.' '<' type [',' type] '>'] '(' conditional ')'
        | func_call
        | index
        | sizeof // maybe alignof??
@@ -68,7 +72,7 @@ atom ::= '(' conditional ')'
 
 sizeof ::= 'sizeof' [ '<' type? '>' ] '(' expr? ')'
 
-func_call ::= atom '(' expr_list ')'
+func_call ::= atom [ '.<' type? { ',' type } ','? '>' ] '(' expr_list ')'
 
 // in reality we'll fold multiple indexes
 // into the same expression (same with calls)
@@ -90,7 +94,7 @@ conditional ::= logical_or
               | logical_or '?' conditional : conditonal
 
 logical_or ::= logical_and
-             | logical_or '||' logical_and 
+             | logical_or '||' logical_and
 
 logical_and ::= equality
               | logical_and '&&' equality
@@ -123,10 +127,12 @@ assignment ::= (unary [':' type?] ('*' | '/' | '%' | '+' | '-' | '<<' | '>>' | '
 
 expr ::= [ 'return' ] conditional
        | assignment
+       | while
+       | defer
+       | for
+       | if
 
 // allows optional trailing comma
 idList ::= id {',' id} ','?
 declList ::= decl {',' decl} ','?
 ```
-
-

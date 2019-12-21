@@ -1,6 +1,9 @@
+extern crate log;
+use log::{info, trace, warn};
+
 // It makes the prefixes nicer to use
 #[allow(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Postfix {
     None,
     u8,
@@ -17,15 +20,22 @@ pub enum Postfix {
     isize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ErrorToken {
     text: String,
     line: usize,
     col: usize,
 }
 
-#[derive(Debug)]
-pub enum Token {
+#[derive(Debug, Clone)]
+pub struct Token {
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub kind: TokenKind,
+}
+
+#[derive(Debug, Clone, PartialEq, EnumAsInner)]
+pub enum TokenKind {
     LParen,
     RParen,
     LBrace,
@@ -72,6 +82,8 @@ pub enum Token {
     Period,
     Comma,
     Uninitialised,
+    Arrow,
+    FatArrow,
 
     Let,
     Sizeof,
@@ -81,12 +93,15 @@ pub enum Token {
     Else,
     If,
     For,
+    Function,
     Struct,
     Enum, // TODO
+    Cast,
     Null,
     Return,
     Break,
     Continue,
+    Is,
 
     Ident(String),
     Character(char),
@@ -95,10 +110,21 @@ pub enum Token {
     Bool(bool)
 }
 
+#[derive(Clone)]
 pub struct Lexer<'a> {
-    line: usize,
-    col: usize,
+    pub line: usize,
+    pub col: usize,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
+}
+
+pub trait TokenIterator<'a>: std::iter::Iterator<Item=&'a Token> {
+    fn peek(&mut self) -> Option<&'a Token>;
+}
+
+impl<'a, I> TokenIterator<'a> for std::iter::Peekable<I> where I: Iterator<Item = &'a Token> {
+    fn peek(&mut self) -> Option<&'a Token> {
+        self.peek().map(|t| *t)
+    }
 }
 
 impl<'a> Lexer<'a> {
@@ -144,47 +170,101 @@ impl<'a> Lexer<'a> {
         c
     }
 
-    fn parse_num(&mut self, start: char) -> Result<Token, ErrorToken> {
+    fn parse_simple_num(&mut self, base: u32) -> String {
+        let mut num = String::new();
+        loop {
+            num.push(match self.chars.peek() {
+                Some(c) if !c.is_digit(base) => break,
+                None => break,
+                Some(c) => self.next().unwrap()
+            });
+        }
+        num
+    }
+
+    fn parse_num(&mut self, start: char) -> Result<TokenKind, ErrorToken> {
         let mut num = start.to_string();
         let mut found_dot = false;
         let mut found_exp = false;
 
-        // TODO: Handle postfixes like u8 and usize
-        loop {
-            let c = match self.chars.peek() {
-                Some(c) if !c.is_digit(10) && *c != 'e' && *c != '.' => break,
-                None => break,
-                Some(c) => *c
-            };
-
-            num.push(c);
+        num += &self.parse_simple_num(10);
+        if self.chars.peek() == Some(&'.') {
+            num.push('.');
             self.move_next();
-
-            // Note: we aren't using our 'peek' method
-            //       since we want spaces to break up
-            //       our number.
-            match c {
-                '0' | '1' | '2' | '3' | '4' | '5'  | '6' | '7' | '8' | '9' => {},
-                'e' if !found_exp => {
-                    found_exp = true;
-                    match self.chars.peek() {
-                        Some('+') | Some('-') => {
-                            num.push(*self.chars.peek().unwrap());
-                            self.move_next();
-                        }
-                        _ => {}
-                    }
-                }
-                '.' if !found_dot && !found_exp => {
-                    found_dot = true;
-                },
-                _ => {
-                    return Err(ErrorToken::new(num, self.line, self.col));
-                }
+            num += &self.parse_simple_num(10);
+        }
+        if self.chars.peek() == Some(&'e') || self.chars.peek() == Some(&'E') {
+            num.push('e');
+            self.move_next();
+            match self.chars.peek() {
+                Some(c) if *c == '+' || *c == '-' => { self.move_next(); num.push(*c); },
+                _ => {}
             }
+            num += &self.parse_simple_num(10);
         }
 
-        Ok(Token::Number(num, Postfix::None))
+        // postfix parsing
+        // i.e. stuff like 2u or 2i64 or 2f...
+        let postfix = match self.chars.peek() {
+            Some('u') => {
+                self.move_next();
+                match self.parse_simple_num(10).as_str() {
+                    "8" => Postfix::u8,
+                    "16" => Postfix::u16,
+                    "32" | "" => Postfix::u32,
+                    "64" => Postfix::u64,
+                    other => {
+                        if self.matches("size") {
+                            Postfix::usize
+                        } else {
+                            warn!("Invalid Postfix...");
+                            return Err(ErrorToken::new(other.to_string(), self.line, self.col));
+                        }
+                    }
+                }
+            },
+            Some('f') => {
+                self.move_next();
+                match self.parse_simple_num(10).as_str() {
+                    "32" | "" => Postfix::f32,
+                    "64" => Postfix::f64,
+                    other => {
+                        warn!("Invalid Postfix...");
+                        return Err(ErrorToken::new(other.to_string(), self.line, self.col));
+                    }
+                }
+            },
+            Some('i') => {
+                self.move_next();
+                match self.parse_simple_num(10).as_str() {
+                    "8" => Postfix::i8,
+                    "16" => Postfix::i16,
+                    "32" | "" => Postfix::i32,
+                    "64" => Postfix::i64,
+                    other => {
+                        if self.matches("size") {
+                            Postfix::isize
+                        } else {
+                            warn!("Invalid Postfix...");
+                            return Err(ErrorToken::new(other.to_string(), self.line, self.col));
+                        }
+                    }
+                }
+            },
+            // default postfix
+            _ if found_dot || found_exp => Postfix::f64,
+            _ => Postfix::i32
+        };
+ 
+        match self.chars.peek() {
+            Some(c) if c.is_ascii_alphabetic() || *c == '_' => {
+                warn!("Invalid Number ... can't have identifier tokens");
+                return Err(ErrorToken::new(num, self.line, self.col));
+            }
+            _ => {}
+        }
+
+        Ok(TokenKind::Number(num, Postfix::None))
     }
 
     fn valid_identifier_continuer(c: char) -> bool {
@@ -216,6 +296,36 @@ impl<'a> Lexer<'a> {
     }
 }
 
+impl Token {
+    pub fn is_assignment(&self) -> bool {
+        match self.kind {
+            TokenKind::Assign => true,
+            TokenKind::AddAssign => true,
+            TokenKind::SubAssign => true,
+            TokenKind::MulAssign => true,
+            TokenKind::ModAssign => true,
+            TokenKind::DivAssign => true,
+            TokenKind::LShiftAssign => true,
+            TokenKind::RShiftAssign => true,
+            TokenKind::BitAndAssign => true,
+            TokenKind::BitOrAssign => true,
+            TokenKind::BitXorAssign => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_unary(&self) -> bool {
+        match self.kind {
+            TokenKind::Not => true,
+            TokenKind::Asterix => true,
+            TokenKind::BitAnd => true,
+            TokenKind::Add => true,
+            TokenKind::Sub => true,
+            _ => false
+        }
+    }
+}
+
 impl ErrorToken {
     pub fn new(text: String, line: usize, col: usize) -> ErrorToken {
         ErrorToken {
@@ -223,6 +333,10 @@ impl ErrorToken {
             line: line,
             col: col
         }
+    }
+
+    pub fn report_error(&self) -> ! {
+        panic!("Error {}:{}  {}", self.line, self.col, self.text);
     }
 }
 
@@ -244,20 +358,23 @@ impl<'a> Iterator for Lexer<'a> {
             self.col = 1;
         }
 
+        let start = (self.line, self.col);
+
         // TODO: Maybe try to use a macro here??
-        match self.next() {
+        let kind = match self.next() {
             Some('+') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::AddAssign)) },
-                _ => Some(Ok(Token::Add))
+                Some('=') => { self.next(); TokenKind::AddAssign },
+                _ => TokenKind::Add
             }
             Some('-') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::SubAssign)) },
-                Some('-') if self.matches("--") => Some(Ok(Token::Uninitialised)),
-                _ => Some(Ok(Token::Sub))
+                Some('=') => { self.next(); TokenKind::SubAssign },
+                Some('>') => { self.next(); TokenKind::Arrow },
+                Some('-') if self.matches("--") => TokenKind::Uninitialised,
+                _ => TokenKind::Sub
             }
             Some('*') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::MulAssign)) },
-                _ => Some(Ok(Token::Asterix))
+                Some('=') => { self.next(); TokenKind::MulAssign },
+                _ => TokenKind::Asterix
             }
             Some('/') => match self.peek() {
                 Some('/') => {
@@ -265,79 +382,83 @@ impl<'a> Iterator for Lexer<'a> {
                     // @HACK: Order has to be this way else it'll read one extra line
                     let start = self.line;
                     while self.peek().is_some() && start == self.line { self.move_next(); }
-                    Iterator::next(self)
+                    return Iterator::next(self)
                 },
-                Some('=') => { self.next(); Some(Ok(Token::DivAssign)) },
-                c => {println!("{}", c.unwrap()); Some(Ok(Token::Div))
-}            }
+                Some('=') => { self.next(); TokenKind::DivAssign },
+                _ => TokenKind::Div
+            }
             Some('%') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::ModAssign)) },
-                _ => Some(Ok(Token::Mod))
+                Some('=') => { self.next(); TokenKind::ModAssign },
+                _ => TokenKind::Mod
             }
             Some('^') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::BitXorAssign)) },
-                _ => Some(Ok(Token::BitXor))
+                Some('=') => { self.next(); TokenKind::BitXorAssign },
+                _ => TokenKind::BitXor
             }
             Some('|') => match self.peek() {
-                Some('|') => { self.next(); Some(Ok(Token::BoolOr)) },
-                Some('=') => { self.next(); Some(Ok(Token::BitOrAssign)) },
-                _ => Some(Ok(Token::BitOr))
+                Some('|') => { self.next(); TokenKind::BoolOr },
+                Some('=') => { self.next(); TokenKind::BitOrAssign },
+                _ => TokenKind::BitOr
             }
             Some('&') => match self.peek() {
-                Some('&') => { self.next(); Some(Ok(Token::BoolAnd)) },
-                Some('=') => { self.next(); Some(Ok(Token::BitAndAssign)) },
-                _ => Some(Ok(Token::BitAnd))
+                Some('&') => { self.next(); TokenKind::BoolAnd },
+                Some('=') => { self.next(); TokenKind::BitAndAssign },
+                _ => TokenKind::BitAnd
             }
-            Some(':') => Some(Ok(Token::Colon)),
-            Some(';') => Some(Ok(Token::SemiColon)),
-            Some('(') => Some(Ok(Token::LParen)),
-            Some(')') => Some(Ok(Token::RParen)),
-            Some('[') => Some(Ok(Token::LBracket)),
-            Some(']') => Some(Ok(Token::RBracket)),
-            Some('{') => Some(Ok(Token::LBrace)),
-            Some('}') => Some(Ok(Token::RBrace)),
-            Some('.') => Some(Ok(Token::Period)),
-            Some(',') => Some(Ok(Token::Comma)),
+            Some(':') => TokenKind::Colon,
+            Some(';') => TokenKind::SemiColon,
+            Some('(') => TokenKind::LParen,
+            Some(')') => TokenKind::RParen,
+            Some('[') => TokenKind::LBracket,
+            Some(']') => TokenKind::RBracket,
+            Some('{') => TokenKind::LBrace,
+            Some('}') => TokenKind::RBrace,
+            Some('.') => TokenKind::Period,
+            Some(',') => TokenKind::Comma,
             Some('<') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::LessEqual)) },
+                Some('=') => { self.next(); TokenKind::LessEqual },
                 Some('<') => { self.next(); match self.peek() {
-                    Some('=') => { self.next(); Some(Ok(Token::LShiftAssign)) },
-                    _ => Some(Ok(Token::LShift))
+                    Some('=') => { self.next(); TokenKind::LShiftAssign },
+                    _ => TokenKind::LShift
                 }},
-                _ => Some(Ok(Token::LAngle)),
+                _ => TokenKind::LAngle,
             },
             Some('>') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::GreaterEqual)) },
+                Some('=') => { self.next(); TokenKind::GreaterEqual },
                 Some('>') => { self.next(); match self.peek() {
-                    Some('=') => { self.next(); Some(Ok(Token::RShiftAssign)) },
-                    _ => Some(Ok(Token::RShift))
+                    Some('=') => { self.next(); TokenKind::RShiftAssign },
+                    _ => TokenKind::RShift
                 }},
-                _ => Some(Ok(Token::RAngle)),
+                _ => TokenKind::RAngle,
             },
             Some('!') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::NotEqual)) },
-                _ => Some(Ok(Token::Not)),
+                Some('=') => { self.next(); TokenKind::NotEqual },
+                _ => TokenKind::Not,
             },
             Some('=') => match self.peek() {
-                Some('=') => { self.next(); Some(Ok(Token::Equal)) },
-                _ => Some(Ok(Token::Assign)),
+                Some('=') => { self.next(); TokenKind::Equal },
+                Some('>') => { self.next(); TokenKind::FatArrow },
+                _ => TokenKind::Assign,
             },
-            Some('f') if self.matches("alse") => Some(Ok(Token::Bool(false))),
-            Some('t') if self.matches("rue") => Some(Ok(Token::Bool(true))),
-            Some('n') if self.matches("ull") => Some(Ok(Token::Null)),
-            Some('i') if self.matches("f") => Some(Ok(Token::If)),
-            Some('w') if self.matches("hile") => Some(Ok(Token::While)),
-            Some('d') if self.matches("defer") => Some(Ok(Token::Defer)),
-            Some('f') if self.matches("or") => Some(Ok(Token::For)),
-            Some('s') if self.matches("truct") => Some(Ok(Token::Struct)),
-            Some('e') if self.matches("num") => Some(Ok(Token::Enum)),
-            Some('e') if self.matches("lse") => Some(Ok(Token::Else)),
-            Some('l') if self.matches("et") => Some(Ok(Token::Let)),
-            Some('s') if self.matches("izeof") => Some(Ok(Token::Sizeof)),
-            Some('n') if self.matches("ew") => Some(Ok(Token::New)),
-            Some('r') if self.matches("eturn") => Some(Ok(Token::Return)),
-            Some('b') if self.matches("reak") => Some(Ok(Token::Break)),
-            Some('c') if self.matches("ontinue") => Some(Ok(Token::Continue)),
+            Some('f') if self.matches("alse") => TokenKind::Bool(false),
+            Some('t') if self.matches("rue") => TokenKind::Bool(true),
+            Some('n') if self.matches("ull") => TokenKind::Null,
+            Some('i') if self.matches("f") => TokenKind::If,
+            Some('i') if self.matches("s") => TokenKind::Is,
+            Some('w') if self.matches("hile") => TokenKind::While,
+            Some('d') if self.matches("defer") => TokenKind::Defer,
+            Some('f') if self.matches("or") => TokenKind::For,
+            Some('f') if self.matches("n") => TokenKind::Function,
+            Some('s') if self.matches("truct") => TokenKind::Struct,
+            Some('e') if self.matches("num") => TokenKind::Enum,
+            Some('e') if self.matches("lse") => TokenKind::Else,
+            Some('l') if self.matches("et") => TokenKind::Let,
+            Some('s') if self.matches("izeof") => TokenKind::Sizeof,
+            Some('n') if self.matches("ew") => TokenKind::New,
+            Some('r') if self.matches("eturn") => TokenKind::Return,
+            Some('b') if self.matches("reak") => TokenKind::Break,
+            Some('c') if self.matches("ontinue") => TokenKind::Continue,
+            Some('c') if self.matches("ast") => TokenKind::Cast,
             Some('"') => {
                 // TODO: Extract into function
                 let mut string = String::new();
@@ -365,12 +486,15 @@ impl<'a> Iterator for Lexer<'a> {
                         None => return Some(Err(ErrorToken::new(string, self.line, self.col)))
                     }
                 }
-                Some(Ok(Token::Str(string)))
+                TokenKind::Str(string)
             }
             Some('\'') => {
                 panic!("TODO: Handle characters.  I'm too lazy todo them");
             },
-            Some(c) if c.is_digit(10) => Some(self.parse_num(c)),
+            Some(c) if c.is_digit(10) => match self.parse_num(c) {
+                Err(e) => return Some(Err(e)),
+                Ok(tok) => tok
+            },
 
             // TODO: C supports unicode identifiers so we should
             //       apparently it also supports \U... :O
@@ -385,11 +509,12 @@ impl<'a> Iterator for Lexer<'a> {
                         _ => break,
                     }
                 }
-                Some(Ok(Token::Ident(id)))
+                TokenKind::Ident(id)
             }
-            Some(other) => Some(Err(ErrorToken::new(other.to_string(), self.line, self.col))),
-            None => None
-        }
+            Some(other) => return Some(Err(ErrorToken::new(other.to_string(), self.line, self.col))),
+            None => return None
+        };
+        Some(Ok(Token{ start: start, end: (self.line, self.col), kind }))
     }
 }
 

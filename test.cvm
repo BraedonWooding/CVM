@@ -1,43 +1,50 @@
-// everything you'll need is included by default
-// currently PC can only be a single file
+// Instead of #include we use imports effectively the same idea
+// just allows faster compilation and easier programming
+// There are also no header files and order doesn't matter!
 
-// We can use struct tags to give us free functions!!
-// For example LinkedList comes with 'append'
-// I won't use it for the sake of showing you some stuff
-// but you can.
-struct(LinkedList) Node<T> {
+// A few things imported by default:
+// - int types (int32_t, ...)
+// - NULL is now a keyword 'null'
+// - malloc is now used as 'new' (you can get raw malloc from stdlib)
+
+//import clib::stdlib;
+//import cvm::Collections;
+
+// Generics are template based (similar to C++)
+// So for example if you use Node<int> It'll create
+// a copy of this struct (and all methods) that use int
+struct Node<T> is (LinkedListNode) {
+    // Identifier ':' Type
     data: T,
-    // pointers go before
-    next: *Node<T>
+    // pointer go before the node
+    next: *Node<T>, // you can have trailing commas of course
 }
 
-// Container really comes with nothing
-// but it helps with printing.
-struct(Container) List<T> {
+// the 'is' just gives us some visualisation tools
+// it tells it how to print out the objects and how
+// they are (typically) related to each other.
+struct List<T> is (Container) {
     head: *Node<T>,
     tail: *Node<T>
 }
 
-// Variables use id : type = value
-// You can use := to infer based on right type
-// Inference isn't smart
-// Functions can be defined inline but aren't closures
-// (I may add closures in the future)
+// Functions are declared as 'fn' Identifier '(' Decls ')' ['->' Type] Block
 fn<T> find_odd(list: List<T>) -> List<T> {
-    // everything default initialised by default
+    // everything default initialised to 0 by default
     // you can use '---' to force uninitialisation
     // C initialisation { } works as normal
     ret : List<T>;
 
-    // dot for everything we'll figure out the right one
+    // '.' for everything we'll figure out the right one
+    // to use based on the type.
+    // ':=' is a variable declaration and assignment infers type
     cur := list.head;
 
     while cur {
         if cur.data % 2 != 0 {
-            // found odd
-            // you don't need '<>' if it can be seen from given
-            // values (just standard unification)
-            appendList<T>(&ret, cur.data);
+            // notice how we don't have to specify T here!
+            // we could by just writing appendList<T>(...)
+            appendList(&ret, cur.data);
         }
         cur = cur.next;
     }
@@ -47,39 +54,93 @@ fn<T> find_odd(list: List<T>) -> List<T> {
 
 fn<T> appendList(list: *List<T>, val: T) {
     if !list.head {
-        // 'new' => 'malloc'
-        // you can use malloc if you really want
-        // but often 'new' will look cleaner
+        // instead of using malloc often we'll use 'new'
+        // it is safer and allows us to even use initialisation
+        // inline which is very nice.
         list.head = list.tail = new *Node<T> { val };
     } else {
         list.tail = list.tail.next = new *Node<T> { val };
     }
 }
 
-// Arrays are very different since they need a defined length
-// so always use pointers for the typical function array
-// unless you want statically allocated array
-// Pointers are smart and won't let you access out of bounds!
-fn main(argc: int, argv: **char) -> int {
-    list : List(int);
+// Typically avoid freeing container objects
+// because often more efficient to stack allocate
+// So no 'free list' here...
+fn<T> freeList<List<T>>(list: List<T>) {
+  for cur := list.head; cur != NULL; {
+    tmp := cur.next;
+      free cur;
+        cur = tmp;
+    }
+}
 
-    // 'read' can help reading in multiple ints
-    // we don't actually need the type here...
-    // it's smart enough to type infer it from usage
-    // but by specifying it we are just making the code clearer
-    // read also works with strings
-    while let i := read<int>(stdin) {
+// Arrays are a little different in CVM
+// we allow you to return them but we don't allow you
+// to pretend they are pointers!  So no *char[] or anything
+fn main(argc: int, argv: **char) -> int {
+    list : List<int>;
+
+    while let i := read(stdin) {
+        // the i's type is inferred from context of use
+        // in this case it is used in append to a list of ints
+        // so it must also be an int therefore it'll force
+        // read to read in an int.
         appendList(list, i);
     }
 
     output := findOdd(list);
-    // we can use 'print' to print complex stuff
-    // note: we can use '%' and it'll figure out the types
-    // and replace it with the right printf string
-    // When printing a list it'll print a simpler format of it
-    // so that it fits on a single line
-    // If you want the nice pretty print you can use pretty_print
+
+    // we can use 'print' to print complex stuff it'll convert
+    // it to a printf (and some other functions for objects)
+    // objects are printed according to the 'is' rules
+    // stated at the top.
     print("Original: %\nOdd Elements: %\n", list, output);
 
     return 0;
 }
+
+enum EnumStuff {
+    // you can do enums as usual
+  THREE = 3,
+
+    // you can also give them associated
+    // struct layouts
+    POS_3D(x: int32_t, y: int32_t, z: int32_t),
+}
+
+fn<T, U> transform(data: *T, length: size_t, func: fn (x: T) -> U) -> *U {
+  // NOTE: this isn't a VLA
+  // 'new' always mallocs arrays
+  res := new() {1, 2, 3};
+
+  // 'i' will automatically be size_t for us
+    // no more unsigned vs signed awfulness...
+    for i := 0; i < length; i++ {
+        res[i] = fn(data[i]);
+    }
+
+    return res;
+}
+
+fn arrays_and_lambdas() {
+  // creating stack allocated arrays
+    a1: U[THREE] = {1, 2, 3};
+    // length_of to get the length of a static array
+    // you can use '=>' to just take a single expression
+    // effectively it maps to just { return expr; }
+    a2 := transform(a1, length_of(a1), fn (x) => x * x);
+
+    // defer makes the call once the function ends
+    defer { free a2; }
+
+    // complex types are easier to represent in cvm
+    // for example in C...
+    // int *a3[8]    is an array (size 8) to int pointers
+    // int (*a4)[8]  is a pointer to an array (size 8) of ints
+    // where as in CVM
+    a3: (*int)[8];   // is an array (size 8) to int pointers
+    a4: *(int[8]); // is a pointer to an array (size 8) of ints
+
+    // you must use parentheses when mixing pointers and arrays
+    // to avoid ambiguity!
+}   

@@ -11,53 +11,102 @@ pub type Ident = String;
 pub type IdentList = Vec<Ident>;
 pub type DeclList = Vec<Decl>;
 
+#[derive(Default, Debug, Clone)]
 pub struct Program {
-    statements: Vec<TopLevel>,
+    pub statements: Vec<TopLevel>,
 }
 
+#[derive(Default, Debug, Clone)]
 pub struct Block {
-    exprs: Vec<Expr>
+    pub exprs: Vec<Expr>
 }
 
+#[derive(Debug, Clone)]
 pub struct Function {
-    gen_args: IdentList,
-    id: Option<Ident>,
-    args: DeclList,
-    ret_type : Option<Type>,
-    // function lambdas are removed
-    // as they are parsed so => is converted
-    block: Block,
+    pub gen_args: IdentList,
+    pub name: Option<Ident>,
+    pub args: DeclList,
+    pub ret: Option<Type>,
+    // short hand => is converted to a return block
+    pub block: Block,
 }
 
+#[derive(Debug, Clone)]
+pub struct Lambda {
+    pub args: DeclList,
+    pub ret: Option<Type>,
+    pub block: Block,
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct Struct {
-    id: Ident,
-    gen_args: IdentList,
-    is_list: IdentList,
-    decls: DeclList,
+    pub id: Ident,
+    pub gen_args: IdentList,
+    pub is_list: IdentList,
+    pub decls: DeclList,
 }
 
+#[derive(Debug, Clone)]
 pub struct Decl {
-    id: Ident,
-    decl_type: Type,
-    val: Option<Expr>
+    pub id: Ident,
+    pub decl_type: Option<Type>,
+    pub val: Option<Expr>
 }
 
+#[derive(Debug, Clone)]
 pub struct Expr {
-    is_return: bool,
-    kind: ExprKind,
-    type_annot: Type
+    pub is_return: bool,
+    pub kind: ExprKind,
+    pub type_annot: Option<Type>
 }
 
+impl Expr {
+    pub fn is_unary(&self) -> bool {
+        !self.is_return && match self.kind {
+            ExprKind::Unary(..) => true,
+            _ => self.is_atom(),
+        }
+    }
+
+    pub fn is_atom(&self) -> bool {
+        !self.is_return && match self.kind {
+            ExprKind::Paren(..) => true,
+            ExprKind::Var(..) => true,
+            ExprKind::New(..) => true,
+            ExprKind::Cast{..} => true,
+            ExprKind::FuncCall(..) => true,
+            ExprKind::Index(..) => true,
+            ExprKind::Sizeof(..) => true,
+            ExprKind::Constant(..) => true,
+            ExprKind::Uninitialiser => true,
+            ExprKind::Let(..) => true,
+            _ => false
+        }
+    }
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum Initialiser {
+    Key{key: Ident, val: Vec<Initialiser>},
+    Val{val: Expr}
+}
+
+/*
+    func: fn<T>(obj: T)->bool = fn<T> odd(obj) => obj % 2 == 0;
+*/
+
+#[derive(Debug, Clone, EnumAsInner)]
 pub enum ExprKind {
     Assign{lhs: Box<Expr>, rhs: Box<Expr>, kind: AssignmentKind},
-    // TODO: Support initialisation in declarations
-    //       or force people to use 'new'
-    // TODO: Add uninitialisers
-    Decl{lhs: Box<Expr>, lhs_type: Type, rhs: Option<Box<Expr>>},
-    New(Type, Initialisation),
+    Decl{lhs: Box<Expr>, lhs_type: Option<Type>, rhs: Option<Box<Expr>>},
+    New(Option<Type>, Option<Box<Expr>>, Vec<Initialiser>),
     Unary(Vec<UnaryKind>, Box<Expr>),
     Paren(Box<Expr>),
+    Var(Ident),
+    Member(IdentList),
+    GenFuncCall(Ident, Vec<Type>, Vec<Expr>),
     FuncCall(Box<Expr>, Vec<Expr>),
+    Cast{to: Option<Type>, from: Option<Type>, obj: Box<Expr>},
     Index(Box<Expr>, Box<Expr>),
     Sizeof(Vec<Type>, Option<Box<Expr>>),
     Binop(Box<Expr>, BinopKind, Box<Expr>),
@@ -65,13 +114,15 @@ pub enum ExprKind {
     Constant(ConstantKind),
     // honestly we could probably remove this...
     Let(Box<Expr>),
-    Func(Function),
+    Lambda(Lambda),
     If{if_cond: Box<Expr>, if_block: Block, else_if: Vec<(Expr, Block)>, else_block: Option<Block>},
     While(Box<Expr>, Block),
     For(Option<Box<Expr>>, Option<Box<Expr>>, Option<Box<Expr>>),
     Defer(Block),
+    Uninitialiser,
 }
 
+#[derive(Debug, Clone, EnumAsInner)]
 pub enum ConstantKind {
     // only one supported so far
     Int32(i32),
@@ -80,21 +131,24 @@ pub enum ConstantKind {
     // more...
     Str(String),
     Char(char),
-    Null(),
+    Null,
     Bool(bool),
 }
 
+#[derive(Debug, Clone, EnumAsInner)]
 pub enum Type {
     Pointer(Box<Type>),
+    Paren(Box<Type>),
     Array {inner: Box<Type>, len: Box<Expr>},
     Var {id: Ident, gen_args: Vec<Type>},
     Fresh {id: usize},
 
     // we don't care about the ids for function types
     // but we do care about the function name.
-    Func {name: Ident, args: Vec<Type>, ret: Box<Type>}
+    Func {name: Option<Ident>, args: Vec<Type>, ret: Option<Box<Type>>, gen_args: Vec<Ident>}
 }
 
+#[derive(Debug, Clone)]
 pub enum BinopKind {
     BitOr,
     BitAnd,
@@ -114,21 +168,18 @@ pub enum BinopKind {
     Mod,
 }
 
-pub struct Initialisation {
-    id: Ident,
-    val: Conditional,
-}
-
+#[derive(Debug, Clone)]
 pub enum UnaryKind {
     Not,
     Deref,
     Address,
     Pos,
-    Neg,
-    Cast(Type)
+    Neg
 }
 
+#[derive(Debug, Clone)]
 pub enum AssignmentKind {
+    Assign,
     MulAssign,
     DivAssign,
     ModAssign,
@@ -141,6 +192,7 @@ pub enum AssignmentKind {
     BitOrAssign
 }
 
+#[derive(Debug, Clone, EnumAsInner)]
 pub enum TopLevel {
     StructDecl(Box<Struct>),
     FuncDecl(Box<Function>),
