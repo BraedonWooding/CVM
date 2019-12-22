@@ -50,6 +50,7 @@ pub enum TokenKind {
     Mod,
     Div,
 
+    BitNot,
     BitAnd,
     BitOr,
     BitXor,
@@ -93,6 +94,7 @@ pub enum TokenKind {
     If,
     For,
     Function,
+    Lambda,
     Struct,
     Enum, // TODO
     Cast,
@@ -315,6 +317,7 @@ impl Token {
 
     pub fn is_unary(&self) -> bool {
         match self.kind {
+            TokenKind::BitNot => true,
             TokenKind::Not => true,
             TokenKind::Asterix => true,
             TokenKind::BitAnd => true,
@@ -361,6 +364,7 @@ impl<'a> Iterator for Lexer<'a> {
 
         // TODO: Maybe try to use a macro here??
         let kind = match self.next() {
+            Some('~') => TokenKind::BitNot,
             Some('+') => match self.peek() {
                 Some('=') => { self.next(); TokenKind::AddAssign },
                 _ => TokenKind::Add
@@ -404,6 +408,7 @@ impl<'a> Iterator for Lexer<'a> {
                 Some('=') => { self.next(); TokenKind::BitAndAssign },
                 _ => TokenKind::BitAnd
             }
+            Some('\\') => TokenKind::Lambda,
             Some(':') => TokenKind::Colon,
             Some(';') => TokenKind::SemiColon,
             Some('(') => TokenKind::LParen,

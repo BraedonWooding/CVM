@@ -30,6 +30,18 @@ struct ::= 'struct' id ['<' idList '>'] ['is' '(' idList ')'] '{' declList '}'
 
 function ::= 'fn' ['<' idList '>'] id? '(' declList ')' [ '->' type ] (block | '=>' conditional)
 
+// the old lambda...
+lambda_old ::= 'fn' id? '(' declList ')' [ '->' type ] (block | '=>' conditional)
+
+// new...
+// i.e \(x, y) => x * y
+lambda ::= '\' '(' lambdaDecl {',' lambdaDecl} ','? ')' '=>' conditional
+         | '\' lambdaDecl '=>' conditional
+
+lambdaDecl ::= id
+             | id ':' type? '=' conditional
+             | id ':' type
+
 // Note: atleast one of type or conditional has to exist
 decl ::= id ':' type? '=' conditional
        | id ':' type
@@ -68,7 +80,7 @@ atom ::= '(' conditional ')'
        | int | flt | string | char | 'null' | 'true' | 'false'
        | '---' // uninitialised signifier
        | 'let' expr
-       | function
+       | lambda
 
 sizeof ::= 'sizeof' [ '<' type? '>' ] '(' conditional? ')'
 
@@ -126,6 +138,7 @@ multiplicative ::= unary
 assignment ::= (unary [':' type?] ('*' | '/' | '%' | '+' | '-' | '<<' | '>>' | '&' | '^' | '|') '=')+ conditional
 
 statement ::= [ 'return' ] conditional
+            | assignment
             | while
             | defer
             | for

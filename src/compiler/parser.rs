@@ -123,7 +123,7 @@ macro_rules! parse_binop {
                     }
                 };
                 Some(Expr {
-                    is_return: false, type_annot: None,
+                    type_annot: None,
                     kind: ExprKind::Binop(Box::new(lhs), kind, Box::new(rhs))
                 })
             };
@@ -183,6 +183,7 @@ fn token_kind_to_unary(tok: &TokenKind) -> Option<UnaryKind> {
         TokenKind::BitAnd => Some(UnaryKind::Address),
         TokenKind::Add => Some(UnaryKind::Pos),
         TokenKind::Sub => Some(UnaryKind::Neg),
+        TokenKind::BitNot => Some(UnaryKind::BitNot),
         _ => None
     }
 }
@@ -194,7 +195,7 @@ impl<'a> Parser<'a> {
         };
         let mut program = Program::default();
         while parser.it.peek().is_some() {
-            program.statements.push(parser.parse_top_level()?);
+            program.top_level.push(parser.parse_top_level()?);
         }
 
         Some(program)
@@ -211,12 +212,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_if(&mut self) -> Option<Expr> {
-        warn!("IF START");
+    fn parse_if(&mut self) -> Option<Statement> {
         let if_cond = Box::new(self.parse_conditional()?);
-        warn!("IF: {:?}", if_cond);
         let if_block = self.parse_block()?;
-        warn!("IF: {:?}", if_block);
         let mut else_if = vec![];
         let mut else_block = None;
 
@@ -231,25 +229,21 @@ impl<'a> Parser<'a> {
             }
         };
 
-        Some(Expr { is_return: false, type_annot: None,
-            kind: ExprKind::If{if_cond, if_block, else_if, else_block} })
+        Some(Statement::If{if_cond, if_block, else_if, else_block})
     }
 
-    fn parse_while(&mut self) -> Option<Expr> {
+    fn parse_while(&mut self) -> Option<Statement> {
         let cond = self.parse_conditional()?;
-        warn!("Cond is: {:?}", cond);
         let block = self.parse_block()?;
-        warn!("Blcok is {:?}", block);
 
-        Some(Expr { is_return: false, type_annot: None,
-            kind: ExprKind::While(Box::new(cond), block) })
+        Some(Statement::While(Box::new(cond), block))
     }
 
-    fn parse_defer(&mut self) -> Option<Expr> {
-        Some(Expr { is_return: false, type_annot: None, kind: ExprKind::Defer(self.parse_block()?) })
+    fn parse_defer(&mut self) -> Option<Statement> {
+        Some(Statement::Defer(self.parse_block()?))
     }
 
-    fn parse_for(&mut self) -> Option<Expr> {
+    fn parse_for(&mut self) -> Option<Statement> {
         let init = parse_or_token!(self, parse_expr, TokenKind::SemiColon, "';'")
             .map(|x| Box::new(x));
         let cond = parse_or_token!(self, parse_conditional, TokenKind::SemiColon, "';'")
@@ -257,8 +251,7 @@ impl<'a> Parser<'a> {
         let step = if peek_expect!(self.it, TokenKind::LBrace) { None }
                    else { Some(Box::new(self.parse_expr()?)) };
 
-        Some(Expr { is_return: false, type_annot: None,
-            kind: ExprKind::For(init, cond, step, self.parse_block()?) })
+        Some(Statement::For(init, cond, step, self.parse_block()?))
     }
 
     fn parse_expr(&mut self) -> Option<Expr> {
@@ -266,26 +259,33 @@ impl<'a> Parser<'a> {
         if lhs.is_unary() {
             // possible declaration
             if try_expect!(self.it, TokenKind::Colon).is_some() {
+                let id = match lhs.kind {
+                    ExprKind::Var(id) => id,
+                    kind => {
+                        warn!("You can't declare a non variable {:?}", kind);
+                        return None;
+                    }
+                };
+
                 let ty = if !peek_expect!(self.it, TokenKind::Assign) {
                     Some(self.parse_type()?)
                 } else {
                     None
                 };
                 let rhs = if try_expect!(self.it, TokenKind::Assign).is_some() {
-                    Some(Box::new(self.parse_conditional()?))
+                    Some(self.parse_conditional()?)
                 } else if ty.is_some() {
                     None
                 } else {
                     warn!("Was expecting and/or type/value i.e. a := 2 or a : int");
                     return None;
                 };
-                Some(Expr { is_return: false, type_annot: None,
-                    kind: ExprKind::Decl {
-                        lhs: Box::new(lhs),
-                        lhs_type: ty,
-                        rhs: rhs
-                    }
-                })
+                Some(Expr { type_annot: None,
+                    kind: ExprKind::Decl(Box::new(Decl {
+                        id: id,
+                        decl_type: ty,
+                        val: rhs
+                    }))})
             } else {
                 // assignment i.e. +=
                 let kind = match self.it.peek() {
@@ -302,7 +302,6 @@ impl<'a> Parser<'a> {
                 };
                 let rhs = Box::new(self.parse_conditional()?);
                 Some(Expr {
-                    is_return: false,
                     type_annot: None,
                     kind: ExprKind::Assign {
                         lhs: Box::new(lhs),
@@ -316,7 +315,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_statement(&mut self) -> Option<Expr> {
+    fn parse_statement(&mut self) -> Option<Statement> {
         expect_match!(self.it, _tok, {
             TokenKind::If => return self.parse_if(),
             TokenKind::While => return self.parse_while(),
@@ -339,8 +338,7 @@ impl<'a> Parser<'a> {
 
         // all statements taht aren't if/for/while/defer... require a semicolon
         eat!(self.it, TokenKind::SemiColon, "';'");
-        inner.is_return = is_return;
-        Some(inner)
+        Some(if is_return { Statement::Return(inner) } else { Statement::Expr(inner) })
     }
 
     fn parse_block(&mut self) -> Option<Block> {
@@ -375,7 +373,10 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => {
                 let ty = self.parse_type()?;
                 eat!(self.it, TokenKind::RParen, "')'");
-                Type::Paren(Box::new(ty))
+                // @NOTE: we remove the parentheses in AST
+                //        this is because to transpile it to a C type
+                //        the parentheses are really annoying...
+                ty
             },
             TokenKind::Ident(_) => {
                 let gen_args = if try_expect!(self.it, TokenKind::LAngle).is_some() {
@@ -498,7 +499,7 @@ impl<'a> Parser<'a> {
         let rhs = self.parse_atom()?;
         if unary_ops.len() > 0 {
             Some(Expr {
-                is_return: false, type_annot: None,
+                type_annot: None,
                 kind: ExprKind::Unary(unary_ops, Box::new(rhs))
             })
         } else {
@@ -537,11 +538,11 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => {
                 let inner = Box::new(self.parse_conditional()?);
                 eat!(self.it, TokenKind::RParen, "')'");
-                Expr { is_return: false, type_annot: None, kind: ExprKind::Paren(inner) }
+                Expr { type_annot: None, kind: ExprKind::Paren(inner) }
             },
             TokenKind::Ident(_) => {
                 let id = tok.kind.into_ident().unwrap();
-                Expr { is_return: false, type_annot: None, kind: ExprKind::Var(id) }
+                Expr { type_annot: None, kind: ExprKind::Var(id) }
             },
             TokenKind::New => {
                 let mut gen_args = self.parse_gentype_list()?;
@@ -565,7 +566,7 @@ impl<'a> Parser<'a> {
                     vec![]
                 };
 
-                Expr { is_return: false, type_annot: None, kind: ExprKind::New(ty, arg, init) }
+                Expr { type_annot: None, kind: ExprKind::New(ty, arg, init) }
             },
             TokenKind::Cast => {
                 // just a function ... like cast.<Out, In>(in: In)
@@ -584,12 +585,12 @@ impl<'a> Parser<'a> {
                     return None;
                 }
                 let obj = Box::new(args.pop().unwrap());
-                Expr { is_return: false, type_annot: None, kind: ExprKind::Cast{ to, from, obj } }
+                Expr { type_annot: None, kind: ExprKind::Cast{ to, from, obj } }
             },
             TokenKind::Number(..) => {
                 let (num, postfix) = tok.kind.into_number().unwrap();
                 // currently only supports int32 and flt32
-                Expr { is_return: false, type_annot: None,
+                Expr { type_annot: None,
                     kind: ExprKind::Constant(match postfix {
                         Postfix::i32 => ConstantKind::Int32(num.parse::<i32>().unwrap()),
                         Postfix::f64 => ConstantKind::Flt64(num.parse::<f64>().unwrap()),
@@ -601,31 +602,31 @@ impl<'a> Parser<'a> {
             },
             TokenKind::Bool(..) => {
                 let value = tok.kind.into_bool().unwrap();
-                Expr { is_return: false, type_annot: None,
+                Expr { type_annot: None,
                        kind: ExprKind::Constant(ConstantKind::Bool(value)) }
             },
             TokenKind::Str(..) => {
                 let value = tok.kind.into_str().unwrap();
-                Expr { is_return: false, type_annot: None,
+                Expr { type_annot: None,
                        kind: ExprKind::Constant(ConstantKind::Str(value)) }
             },
             TokenKind::Null => {
-                Expr { is_return: false, type_annot: None,
+                Expr { type_annot: None,
                     kind: ExprKind::Constant(ConstantKind::Null) }
             },
             TokenKind::Character(..) => {
                 let value = tok.kind.into_character().unwrap();
-                Expr { is_return: false, type_annot: None,
+                Expr { type_annot: None,
                     kind: ExprKind::Constant(ConstantKind::Char(value)) }
             },
             TokenKind::Uninitialised => {
-                Expr { is_return: false, type_annot: None, kind: ExprKind::Uninitialiser }
+                Expr { type_annot: None, kind: ExprKind::Uninitialiser }
             },
             TokenKind::Let => {
-                Expr { is_return: false, type_annot: None, kind: ExprKind::Let(Box::new(self.parse_expr()?)) }
+                Expr { type_annot: None, kind: ExprKind::Let(Box::new(self.parse_expr()?)) }
             },
-            TokenKind::Function => {
-                Expr { is_return: false, type_annot: None, kind: ExprKind::Lambda(self.parse_lambda()?) }
+            TokenKind::Lambda => {
+                Expr { type_annot: None, kind: ExprKind::Lambda(self.parse_lambda()?) }
             };
             _ => {
                 warn!("Unknown Token... tried to parse an atom {:?}", self.it.peek());
@@ -639,7 +640,7 @@ impl<'a> Parser<'a> {
         let mut res = lhs;
 
         res = loop {
-            let tmp = Expr { is_return: false, type_annot: None, kind: res.kind };
+            let tmp = Expr { type_annot: None, kind: res.kind };
             res.kind = expect_match!(self.it, tok, {
                 TokenKind::Period => {
                     // member access or function call
@@ -715,7 +716,7 @@ impl<'a> Parser<'a> {
             Some(_) | None => return None,
         };
 
-        let id_list = if try_expect!(self.it, TokenKind::LAngle).is_some() {
+        let gen_args = if try_expect!(self.it, TokenKind::LAngle).is_some() {
             parse_list!(self, parse_id, TokenKind::Comma, TokenKind::RAngle, "'>'")
         } else {
             vec![]
@@ -730,14 +731,8 @@ impl<'a> Parser<'a> {
         };
 
         eat!(self.it, TokenKind::LBrace, "'{'");
-        let decl_list = parse_list!(self, parse_decl, TokenKind::Comma, TokenKind::RBrace, "'}'");
-
-        Some(Struct {
-            id: id,
-            gen_args: id_list,
-            decls: decl_list,
-            is_list: is_list
-        })
+        let decls = parse_list!(self, parse_decl, TokenKind::Comma, TokenKind::RBrace, "'}'");
+        Some(Struct { id, gen_args, decls, is_list })
     }
 
     fn parse_opt_decl(&mut self) -> Option<Decl> {
@@ -761,35 +756,26 @@ impl<'a> Parser<'a> {
             (None, None)
         };
 
-        return Some(Decl {
-            id: id,
-            decl_type: decl_type,
-            val: val
-        })
+        return Some(Decl { id, decl_type, val })
     }
 
     fn parse_lambda(&mut self) -> Option<Lambda> {
-        eat!(self.it, TokenKind::LParen, "'('");
-        let args = parse_list!(self, parse_opt_decl, TokenKind::Comma, TokenKind::RParen, "')'");
-        let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
-            Some(self.parse_type()?)
+        let args = if try_expect!(self.it, TokenKind::LParen).is_some() {
+            // arg list
+            parse_list!(self, parse_opt_decl, TokenKind::Comma, TokenKind::RParen, "')'")
         } else {
-            None
+            // single arg
+            vec![self.parse_opt_decl()?]
         };
 
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
-            let mut cond = self.parse_conditional()?;
-            cond.is_return = true;
-            Block { exprs: vec![cond] }
+            let cond = self.parse_conditional()?;
+            Block { exprs: vec![Statement::Return(cond)] }
         } else {
             self.parse_block()?
         };
 
-        Some(Lambda {
-            args,
-            ret,
-            block
-        })
+        Some(Lambda { args, block })
     }
 
     fn parse_function(&mut self) -> Option<Function> {
@@ -815,20 +801,13 @@ impl<'a> Parser<'a> {
         };
 
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
-            let mut cond = self.parse_conditional()?;
-            cond.is_return = true;
-            Block { exprs: vec![cond] }
+            let cond = self.parse_conditional()?;
+            Block { exprs: vec![Statement::Return(cond)] }
         } else {
             self.parse_block()?
         };
 
-        Some(Function {
-            gen_args,
-            name,
-            args,
-            ret,
-            block
-        })
+        Some(Function { gen_args, name, args, ret, block })
     }
 }
 

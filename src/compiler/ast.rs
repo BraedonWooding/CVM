@@ -11,17 +11,17 @@ pub type Ident = String;
 pub type IdentList = Vec<Ident>;
 pub type DeclList = Vec<Decl>;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct Program {
-    pub statements: Vec<TopLevel>,
+    pub top_level: Vec<TopLevel>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct Block {
-    pub exprs: Vec<Expr>
+    pub exprs: Vec<Statement>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Function {
     pub gen_args: IdentList,
     pub name: Option<Ident>,
@@ -31,14 +31,13 @@ pub struct Function {
     pub block: Block,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Lambda {
     pub args: DeclList,
-    pub ret: Option<Type>,
     pub block: Block,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct Struct {
     pub id: Ident,
     pub gen_args: IdentList,
@@ -46,30 +45,39 @@ pub struct Struct {
     pub decls: DeclList,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Decl {
     pub id: Ident,
     pub decl_type: Option<Type>,
     pub val: Option<Expr>
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub enum Statement {
+    If{if_cond: Box<Expr>, if_block: Block, else_if: Vec<(Expr, Block)>, else_block: Option<Block>},
+    While(Box<Expr>, Block),
+    For(Option<Box<Expr>>, Option<Box<Expr>>, Option<Box<Expr>>, Block),
+    Defer(Block),
+    Expr(Expr),
+    Return(Expr)
+}
+
+#[derive(Debug)]
 pub struct Expr {
-    pub is_return: bool,
     pub kind: ExprKind,
     pub type_annot: Option<Type>
 }
 
 impl Expr {
     pub fn is_unary(&self) -> bool {
-        !self.is_return && match self.kind {
+        match self.kind {
             ExprKind::Unary(..) => true,
             _ => self.is_atom(),
         }
     }
 
     pub fn is_atom(&self) -> bool {
-        !self.is_return && match self.kind {
+        match self.kind {
             ExprKind::Paren(..) => true,
             ExprKind::Var(..) => true,
             ExprKind::New(..) => true,
@@ -85,20 +93,16 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone, EnumAsInner)]
+#[derive(Debug, EnumAsInner)]
 pub enum Initialiser {
     Key{key: Ident, val: Vec<Initialiser>},
     Val{val: Expr}
 }
 
-/*
-    func: fn<T>(obj: T)->bool = fn<T> odd(obj) => obj % 2 == 0;
-*/
-
-#[derive(Debug, Clone, EnumAsInner)]
+#[derive(Debug, EnumAsInner)]
 pub enum ExprKind {
     Assign{lhs: Box<Expr>, rhs: Box<Expr>, kind: AssignmentKind},
-    Decl{lhs: Box<Expr>, lhs_type: Option<Type>, rhs: Option<Box<Expr>>},
+    Decl(Box<Decl>),
     New(Option<Type>, Option<Box<Expr>>, Vec<Initialiser>),
     Unary(Vec<UnaryKind>, Box<Expr>),
     Paren(Box<Expr>),
@@ -115,14 +119,10 @@ pub enum ExprKind {
     // honestly we could probably remove this...
     Let(Box<Expr>),
     Lambda(Lambda),
-    If{if_cond: Box<Expr>, if_block: Block, else_if: Vec<(Expr, Block)>, else_block: Option<Block>},
-    While(Box<Expr>, Block),
-    For(Option<Box<Expr>>, Option<Box<Expr>>, Option<Box<Expr>>, Block),
-    Defer(Block),
     Uninitialiser,
 }
 
-#[derive(Debug, Clone, EnumAsInner)]
+#[derive(Debug, EnumAsInner)]
 pub enum ConstantKind {
     // only one supported so far
     Int32(i32),
@@ -135,10 +135,9 @@ pub enum ConstantKind {
     Bool(bool),
 }
 
-#[derive(Debug, Clone, EnumAsInner)]
+#[derive(Debug, EnumAsInner)]
 pub enum Type {
     Pointer(Box<Type>),
-    Paren(Box<Type>),
     Array {inner: Box<Type>, len: Box<Expr>},
     Var {id: Ident, gen_args: Vec<Type>},
     Fresh {id: usize},
@@ -148,7 +147,7 @@ pub enum Type {
     Func {name: Option<Ident>, args: Vec<Type>, ret: Option<Box<Type>>, gen_args: Vec<Ident>}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BinopKind {
     BitOr,
     BitAnd,
@@ -170,8 +169,9 @@ pub enum BinopKind {
     Mod,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum UnaryKind {
+    BitNot,
     Not,
     Deref,
     Address,
@@ -179,7 +179,7 @@ pub enum UnaryKind {
     Neg
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum AssignmentKind {
     Assign,
     MulAssign,
@@ -194,7 +194,7 @@ pub enum AssignmentKind {
     BitOrAssign
 }
 
-#[derive(Debug, Clone, EnumAsInner)]
+#[derive(Debug, EnumAsInner)]
 pub enum TopLevel {
     StructDecl(Box<Struct>),
     FuncDecl(Box<Function>),

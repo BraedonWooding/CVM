@@ -1,20 +1,17 @@
 #[macro_use]
 extern crate enum_as_inner;
 
-mod compiler;
-use compiler::lexer::Lexer;
-use compiler::parser::Parser;
-
 use std::fs::File;
 use std::fs;
 
 extern crate clap;
 use clap::{Arg, App, SubCommand};
 
-mod logger;
-
 extern crate log;
 extern crate simple_logger;
+
+extern crate cvm_lib;
+use cvm_lib::*;
 
 fn main() -> std::io::Result<()> {
     simple_logger::init().unwrap();
@@ -36,6 +33,7 @@ fn main() -> std::io::Result<()> {
                  --basic-typed-ast  'Perform first step type assignment on AST'
                  --typed-ast        'Fully resolve all types'
                  --bytecode         'Print out the resultant bytecode'
+                 --transpile-c      'Transpile the AST to C'
                  <INPUT>            'Sets the input file to use'")
         )
         .get_matches();
@@ -62,7 +60,18 @@ fn main() -> std::io::Result<()> {
             if sub_matches.is_present("ast") {
                 println!("== AST Output Started ==");
                 println!("{:?}", ast);
-                println!("== AST Output Started ==");
+                println!("== AST Output Finished ==");
+            }
+
+            if sub_matches.is_present("transpile-c") && ast.is_some() {
+                println!("== Transpilation to C Started ==");
+                let mut transpiler = c_transpiler::Transpiler::new();
+                transpiler.transpile_program(&ast.unwrap());
+                let output = transpiler.get_output();
+                println!("== Transpilation to C Finished ==");
+                println!("== Result of C Transpilation Started ==");
+                println!("{}", output);
+                println!("== Result of C Transpilation Finished ==");
             }
 
             // and so on...

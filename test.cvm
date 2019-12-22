@@ -116,7 +116,7 @@ fn arrays_and_lambdas() {
     // length_of to get the length of a static array
     // you can use '=>' to just take a single expression
     // effectively it maps to just { return expr; }
-    a2 := transform(a1, length_of(a1), fn (x) => x * x);
+    a2 := transform(a1, length_of(a1), \x => x * x);
 
     // defer makes the call once the function ends
     defer { free(a2); }
