@@ -24,7 +24,7 @@ pub struct Block {
 #[derive(Debug)]
 pub struct Function {
     pub gen_args: IdentList,
-    pub name: Option<Ident>,
+    pub name: Ident,
     pub args: DeclList,
     pub ret: Option<Type>,
     // short hand => is converted to a return block
@@ -144,7 +144,7 @@ pub enum Type {
 
     // we don't care about the ids for function types
     // but we do care about the function name.
-    Func {name: Option<Ident>, args: Vec<Type>, ret: Option<Box<Type>>, gen_args: Vec<Ident>}
+    Func {args: Vec<Type>, ret: Option<Box<Type>>, gen_args: Vec<Ident>}
 }
 
 #[derive(Debug)]

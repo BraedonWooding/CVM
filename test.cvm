@@ -52,15 +52,6 @@ fn<T> find_odd(list: List<T>) -> List<T> {
     return ret;
 }
 
-fn<T> appendList(list: *List<T>, val: T) {
-    if !list.head {
-        // instead of using malloc often we'll use 'new'
-        // it is safer and allows us to even use initialisation
-        // inline which is very nice.
-    } else {
-    }
-}
-
 // Typically avoid freeing container objects
 // because often more efficient to stack allocate
 // So no 'free list' here...

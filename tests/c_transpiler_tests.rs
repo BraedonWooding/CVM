@@ -26,6 +26,18 @@ macro_rules! create_constant {
     (Double $n:expr) => {
         Expr { kind: ExprKind::Constant(ConstantKind::Flt64($n)), type_annot: Some(create_type!(Var "double")) }
     };
+    (Str $n:expr) => {
+        Expr { kind: ExprKind::Constant(ConstantKind::Str($n)), type_annot: Some(create_type!(Pointer (Var "char"))) }
+    };
+    (Char $n:expr) => {
+        Expr { kind: ExprKind::Constant(ConstantKind::Char($n)), type_annot: Some(create_type!(Var "char")) }
+    };
+    (Null) => {
+        Expr { kind: ExprKind::Constant(ConstantKind::Null), type_annot: Some(create_type!(Pointer (Var "void"))) }
+    };
+    (Bool $n:expr) => {
+        Expr { kind: ExprKind::Constant(ConstantKind::Bool($n)), type_annot: Some(create_type!(Var "bool")) }
+    };
 }
 
 macro_rules! test_type {

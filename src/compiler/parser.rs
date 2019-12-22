@@ -393,13 +393,6 @@ impl<'a> Parser<'a> {
                     vec![]
                 };
 
-                let name = if !peek_expect!(self.it, TokenKind::LParen) {
-                    // NOTE: we have to propagate the failing here
-                    Some(self.parse_id()?)
-                } else {
-                    None
-                };
-
                 eat!(self.it, TokenKind::LParen, "'('");
                 let args = parse_list!(self, parse_type, TokenKind::Comma, TokenKind::RParen, "')'");
                 let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
@@ -408,7 +401,7 @@ impl<'a> Parser<'a> {
                     None
                 };
 
-                Type::Func{name, args, ret, gen_args}
+                Type::Func{args, ret, gen_args}
             };
             _ => {
                 warn!("Was expecting a type but instead found (TODO: put token found here)");
@@ -785,12 +778,7 @@ impl<'a> Parser<'a> {
             vec![]
         };
 
-        let name = if !peek_expect!(self.it, TokenKind::LParen) {
-            // NOTE: we have to propagate the failing here
-            Some(self.parse_id()?)
-        } else {
-            None
-        };
+        let name = self.parse_id()?;
 
         eat!(self.it, TokenKind::LParen, "'('");
         let args = parse_list!(self, parse_decl, TokenKind::Comma, TokenKind::RParen, "')'");

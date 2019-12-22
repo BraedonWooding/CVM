@@ -29,17 +29,86 @@ impl Transpiler {
     }
 
     fn end_scope(&mut self, symbol: &str) {
-        self.depth += 1;
+        self.depth -= 1;
         self.write_indent();
         self.builder += symbol;
     }
 
     fn transpile_statement(&mut self, statement: &Statement) {
-        
+        match statement {
+            Statement::If{if_cond, if_block, else_if, else_block} => {
+                self.builder += "if (";
+                self.transpile_expr(&if_cond);
+                self.builder += ") ";
+                self.transpile_block(&if_block);
+
+                for (expr, block) in else_if {
+                    self.builder += " else if (";
+                    self.transpile_expr(&expr);
+                    self.builder += ") ";
+                    self.transpile_block(&block);
+                }
+
+                if else_block.is_some() { self.transpile_block(&else_block.as_ref().unwrap()); }
+                self.builder += "\n";
+            },
+            Statement::While(expr, block) => {
+                self.builder += "while (";
+                self.transpile_expr(&expr);
+                self.builder += ") ";
+                self.transpile_block(&block);
+                self.builder += "\n";
+            },
+            Statement::For(init, cond, step, block) => {
+                self.builder += "for (";
+                if init.is_some() { self.transpile_expr(&init.as_ref().unwrap()); }
+                self.builder += ";";
+                if cond.is_some() {
+                    self.builder += " ";
+                    self.transpile_expr(&cond.as_ref().unwrap());
+                }
+                self.builder += ";";
+                if step.is_some() {
+                    self.builder += " ";
+                    self.transpile_expr(&step.as_ref().unwrap());
+                }
+                self.builder += ") ";
+                self.transpile_block(&block);
+                self.builder += "\n";
+            },
+            Statement::Defer(..) => {
+                warn!("Defer wasn't removed in the pre-transpilation step...");
+            },
+            Statement::Expr(expr) => {
+                self.transpile_expr(&expr);
+                self.builder += ";";
+            },
+            Statement::Return(expr) => {
+                self.builder += "return ";
+                self.transpile_expr(&expr);
+                self.builder += ";";
+            }
+        }
     }
 
     fn transpile_func_decl(&mut self, decl: &Function) {
-        
+        if decl.ret.is_some() {
+            self.transpile_type(decl.ret.as_ref().unwrap());
+        } else {
+            warn!("Function {} missing return type", decl.name);
+            self.builder += "???";
+        }
+        self.builder += &format!(" {}(", decl.name);
+        // write arguments
+        for (i, arg) in decl.args.iter().enumerate() {
+            self.transpile_decl(&arg);
+            if i < decl.args.len() - 1 {
+                self.builder += ", ";
+            }
+        }
+        self.builder += ") ";
+        self.transpile_block(&decl.block);
+        self.builder += "\n";
     }
 
     fn transpile_assignment_op(&mut self, op: &AssignmentKind) {
@@ -101,9 +170,18 @@ impl Transpiler {
             },
             ExprKind::Decl(decl) => {
                 self.transpile_decl(&decl);
+                match &decl.val {
+                    Some(Expr { kind: ExprKind::Uninitialiser, .. }) => {},
+                    Some(expr) => {
+                        self.builder += " = ";
+                        self.transpile_expr(&expr);
+                    }
+                    None => { self.builder += " = {0}"; }
+                }
             },
             ExprKind::New(..) => {
                 // TODO
+                self.builder += "???";
             },
             ExprKind::Unary(kinds, expr) => {
                 for kind in kinds.as_slice() { self.transpile_unary_op(&kind); }
@@ -121,6 +199,7 @@ impl Transpiler {
             },
             ExprKind::GenFuncCall(..) => {
                 // TODO
+                self.builder += "???";
             },
             ExprKind::FuncCall(expr, args) => {
                 self.transpile_expr(&expr);
@@ -133,6 +212,7 @@ impl Transpiler {
             },
             ExprKind::Cast{..} => {
                 // TODO
+                self.builder += "???";
             },
             ExprKind::Index(obj, index) => {
                 self.transpile_expr(&obj);
@@ -142,6 +222,7 @@ impl Transpiler {
             },
             ExprKind::Sizeof(..) => {
                 // TODO
+                self.builder += "???";
             },
             ExprKind::Binop(lhs, op, rhs) => {
                 self.transpile_expr(&lhs);
@@ -150,12 +231,17 @@ impl Transpiler {
             },
             ExprKind::Ternary{..} => {
                 // TODO
+                self.builder += "???";
             },
             ExprKind::Constant(val) => {
                 match val {
                     ConstantKind::Int32(n) => self.builder += &format!("{}", n),
                     ConstantKind::Flt64(n) => self.builder += &format!("{}", n),
-                    ConstantKind::Str(string) => self.builder += &string,
+                    ConstantKind::Str(string) => {
+                        self.builder += "\"";
+                        self.builder += &string.escape_default().to_string();
+                        self.builder += "\"";
+                    },
                     ConstantKind::Char(c) => self.builder += &format!("{}", c),
                     ConstantKind::Null => self.builder += "NULL",
                     ConstantKind::Bool(b) => self.builder += &format!("{}", b),
@@ -169,6 +255,7 @@ impl Transpiler {
             ExprKind::Lambda(lambda) => {
                 // this will need to be declared else where...
                 // TODO
+                self.builder += "???";
             },
             ExprKind::Uninitialiser => {
                 // no op...
@@ -208,20 +295,15 @@ impl Transpiler {
                 }
                 self.builder += &id;
             },
-            Type::Func{name, args: _, ret, ..} => {
-                let name = match name {
-                    Some(_) => &name.as_ref().unwrap(),
-                    None => "func_TODO_NO_NAME"
-                };
-
+            Type::Func{args: _, ret, ..} => {
                 match ret {
                     Some(ty) => self.transpile_type_lhs(&ty),
                     None => {
-                        warn!("No return type for function {}", name);
+                        warn!("No return type for function");
                         self.builder += "???";
                     }
                 }
-                self.builder += &format!("(*{0}", name);
+                self.builder += &format!("(*");
             },
             Type::Fresh{..} => {
                 warn!("Fresh variables not supported for printing yet");
@@ -259,12 +341,11 @@ impl Transpiler {
                 self.transpile_type_rhs(&inner);
             },
             Type::Var{..} => { /* no op */ },
-            Type::Func{name, args, ret, ..} => {
+            Type::Func{args, ret, ..} => {
                 self.builder += ")(";
                 if args.len() > 0 {
                     for (i, arg) in args.iter().enumerate() {
-                        self.transpile_type_lhs(arg);
-                        self.transpile_type_rhs(arg);
+                        self.transpile_type(&arg);
                         if i < args.len() - 1 { self.builder += ","; }
                     }
                 } else {
@@ -274,7 +355,7 @@ impl Transpiler {
                 match ret {
                     Some(ty) => self.transpile_type_rhs(&ty),
                     None => {
-                        warn!("No return type for function {:?}", name);
+                        warn!("No return type for function");
                         self.builder += "???";
                     }
                 }
@@ -288,6 +369,7 @@ impl Transpiler {
         match &decl.decl_type {
             Some(ty) => {
                 self.transpile_type_lhs(&ty);
+                self.builder += " ";
             },
             None => {
                 warn!("decl type for decl with id {} is none... replacing type with ???", decl.id);
@@ -304,7 +386,7 @@ impl Transpiler {
     }
 
     fn transpile_struct_decl(&mut self, decl: &Struct) {
-        self.builder += &format!("typedef struct {0} {0}\nstruct {0}",
+        self.builder += &format!("typedef struct {0} {0};\nstruct {0}",
                                 decl.id);
         self.begin_scope(" {\n");
         // generic args not yet supported... TODO
@@ -314,10 +396,11 @@ impl Transpiler {
         // NOTE: 'is' list is ignored for transpilation
 
         for member in decl.decls.as_slice() {
+            self.write_indent();
             self.transpile_decl(&member);
             self.builder += ";\n";
         }
-        self.end_scope("}");
+        self.end_scope("}\n");
     }
 
     fn transpile_top_level(&mut self, top_level: &TopLevel) {
@@ -328,13 +411,19 @@ impl Transpiler {
     }
 
     fn transpile_block(&mut self, block: &Block) {
-        
+        self.begin_scope("{\n");
+        for statement in block.exprs.as_slice() {
+            self.write_indent();
+            self.transpile_statement(statement);
+            self.builder += "\n";
+        }
+        self.end_scope("}");
     }
 
     pub fn transpile_program(&mut self, program: &Program) {
         for statement in program.top_level.as_slice() {
             self.transpile_top_level(&statement);
-            self.builder += "\n\n";
+            self.builder += "\n";
         }
     }
 }
