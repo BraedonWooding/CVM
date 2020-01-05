@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate enum_as_inner;
 
+#[macro_use]
+extern crate lazy_static;
+
 use std::fs::File;
 use std::fs;
 
@@ -35,6 +38,7 @@ fn main() -> std::io::Result<()> {
                  --bytecode         'Print out the resultant bytecode'
                  --transpile-c      'Transpile the AST to C'
                  --alpha-types      'Use alphabetical type names for fresh type variables'
+                 --type-tables      'Print out all the type tables'
                  <INPUT>            'Sets the input file to use'")
         )
         .get_matches();
@@ -56,9 +60,9 @@ fn main() -> std::io::Result<()> {
             // most steps require the previous ones to exist
             // so we always generate each step... it is just more that
             // we print out the itermediaries at each point
-            let mut ast = match Parser::parse_program(lexer) {
-                Some(ast) => ast,
-                None => return Ok(()),
+            let (mut ast, mut stack) = match Parser::parse_program(lexer) {
+                (Some(ast), stack) => (ast, stack),
+                (None, ..) => return Ok(()),
             };
 
             if sub_matches.is_present("ast") {
@@ -67,12 +71,18 @@ fn main() -> std::io::Result<()> {
                 println!("== AST Output Finished ==");
             }
 
-            TypeInfer::type_infer_program(&mut ast);
+            TypeInfer::type_infer_program(&mut ast, &mut stack);
 
             if sub_matches.is_present("basic-typed-ast") {
                 println!("== Basic Typed AST Started ==");
                 println!("{:?}", ast);
                 println!("== Basic Typed AST Finished ==");
+            }
+
+            if sub_matches.is_present("type-tables") {
+                println!("== Type Tables Started ==");
+                println!("{:#?}", stack.fresh_type_env);
+                println!("== Type Tables Finished ==");
             }
 
             if sub_matches.is_present("transpile-c") {

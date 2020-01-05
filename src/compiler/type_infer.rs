@@ -1,20 +1,22 @@
 use crate::compiler::scope::*;
 use crate::compiler::ast::*;
+use std::rc::Rc;
 
 extern crate log;
 use log::{info, warn};
 
-pub struct TypeInfer {
-    stack: ScopeStack,
+pub struct TypeInfer<'a> {
+    stack: &'a mut ScopeStack,
 }
 
-impl TypeInfer {
-    pub fn type_infer_program(program: &mut Program) {
-        let checker = TypeInfer {
-            stack: ScopeStack::new(&program.top_scope),
-        };
+impl<'a> TypeInfer<'a> {
+    pub fn type_infer_program(program: &mut Program, stack: &'a mut ScopeStack) {
+        let mut checker = TypeInfer { stack };
 
         // type check all functions and structs...
+        for function in program.functions.values_mut() {
+            checker.type_infer_function(function);
+        }
     }
 
     fn deref_type(&mut self, ty: ParsedType) -> Option<ParsedType> {
@@ -22,25 +24,16 @@ impl TypeInfer {
             // This is the easy case, clearly we can just extract inner
             ParsedType::Pointer(inner) | ParsedType::Array{inner, ..} => Some(*inner),
             ParsedType::Fresh{id} => {
-                let ty_obj;
-                let mut ty;
-                {
-                    // a little messy because we need cur's scope to end
-                    // prior to our 'self.deref_type' call
-                    let mut cur = self.stack.cur().borrow_mut();
-                    ty_obj = cur.lookup_fresh(id);
-                    ty = ty_obj.borrow_mut();
-                }
+                let ty_obj = self.stack.lookup_fresh(id);
+                let mut ty = ty_obj.borrow_mut();
 
-                // can be if let when they allow && inside it
-                // TODO: Eventually clean this up
                 let new_obj = match *ty {
                     ParsedType::Fresh{id: new_id} if new_id == id => true,
                     _ => false,
                 };
 
                 if new_obj {
-                    let new_id = Scope::new_fresh_type();
+                    let new_id = ScopeStack::new_fresh_type();
                     *ty = ParsedType::Pointer(Box::new(new_id.clone()));
                     Some(new_id)
                 } else {
@@ -81,8 +74,15 @@ impl TypeInfer {
                     Some(ref mut expr) => {
                         self.type_infer_expr(expr);
                         match &decl.decl_type {
+                            // NOTE: This would happen anyways in type_checking
+                            //       but it's fine to do it here.
+                            //       If the type is fresh for a declaration
+                            //       then it must be auto assigned so we can remove it
+                            None | Some(ParsedType::Fresh{..}) => {
+                                decl.decl_type = expr.type_annot.clone();
+                                expr.type_annot.clone()
+                            }
                             Some(ty) => Some(ty.clone()),
-                            None => expr.type_annot.clone()
                         }
                     },
                     None => match &decl.decl_type {
@@ -141,7 +141,27 @@ impl TypeInfer {
                 for arg in args.iter_mut() {
                     self.type_infer_expr(arg);
                 }
-                func.type_annot.clone()
+                match &func.type_annot {
+                    None => None,
+                    Some(ParsedType::Func{ret, ..}) => Some((**ret).clone()),
+                    Some(ParsedType::Fresh{id}) => {
+                        let ty_obj = self.stack.lookup_fresh(*id);
+                        let mut ty = ty_obj.borrow_mut();
+                        // TODO: Make this recursive to handle a -> b -> func
+                        if let ParsedType::Func{ref ret, ..} = *ty {
+                            Some((**ret).clone())
+                        } else {
+                            // just create a new fresh type
+                            // for now, the type checker will fix it
+                            Some(ScopeStack::new_fresh_type())
+                        }
+                    },
+                    _ => {
+                        // TODO: Better error...
+                        warn!("Can't perform a call on a pointer, array, vec");
+                        None
+                    }
+                }
             },
             ExprKind::Cast{to, ref mut obj, ..} => {
                 self.type_infer_expr(obj);
@@ -179,7 +199,7 @@ impl TypeInfer {
                         // will produce a type equivalent to the types given
                         // the lhs or rhs may not have a specified type yet...
                         // so we can't really infer a proper type so we'll give it a type variable
-                        Some(Scope::new_fresh_type())
+                        Some(ScopeStack::new_fresh_type())
                     },
                     BinopKind::BoolAnd | BinopKind::BoolOr | BinopKind::Equal |
                     BinopKind::NotEqual | BinopKind::LessThan | BinopKind::GreaterThan |
@@ -198,7 +218,7 @@ impl TypeInfer {
                 ConstantKind::Flt64(..) => Some(ParsedType::Var{id: "double".to_string(), gen_args: vec![]}),
                 ConstantKind::Str(..) => Some(ParsedType::Pointer(Box::new(ParsedType::Var{id: "char".to_string(), gen_args: vec![]}))),
                 ConstantKind::Char(..) => Some(ParsedType::Var{id: "char".to_string(), gen_args: vec![]}),
-                ConstantKind::Null => Some(ParsedType::Pointer(Box::new(Scope::new_fresh_type()))),
+                ConstantKind::Null => Some(ParsedType::Pointer(Box::new(ScopeStack::new_fresh_type()))),
                 ConstantKind::Bool(..) => Some(ParsedType::Var{id: "bool".to_string(), gen_args: vec![]}),
             },
             ExprKind::Let(ref mut inner) => {
@@ -212,11 +232,66 @@ impl TypeInfer {
             // doesn't really have a 'type' is kinda like 'null'
             // for example `x := null` is an error and so is `x := ---`
             // because both don't know what type is 'x'
-            ExprKind::Uninitialiser => Some(Scope::new_fresh_type())
+            ExprKind::Uninitialiser => Some(ScopeStack::new_fresh_type())
         };
     }
 
+    fn type_infer_block(&mut self, block: &mut Block) {
+        for expr in block.exprs.iter_mut() {
+            self.type_infer_statement(expr);
+        }
+    }
+
+    fn type_infer_expr_and_block(&mut self, expr: &mut Expr, block: &mut Block) {
+        self.stack.push(&block.scope);
+        self.type_infer_expr(expr);
+        self.type_infer_block(block);
+        self.stack.pop_scope();
+    }
+
+    fn type_infer_statement(&mut self, statement: &mut Statement) {
+        match statement {
+            Statement::If{ref mut if_cond, ref mut if_block, ref mut else_if, ref mut else_block} => {
+                self.type_infer_expr_and_block(if_cond, if_block);
+
+                for (ref mut expr, ref mut block) in else_if.iter_mut() {
+                    self.type_infer_expr_and_block(expr, block);
+                }
+
+                if let Some(ref mut block) = else_block { self.type_infer_block(block); }
+            },
+            Statement::While(ref mut expr, ref mut block) => {
+                self.type_infer_expr_and_block(expr, block);
+            },
+            Statement::For(ref mut start, ref mut cond, ref mut end, ref mut block) => {
+                self.stack.push(&block.scope);
+                if let Some(ref mut expr) = start { self.type_infer_expr(expr); }
+                if let Some(ref mut expr) = cond { self.type_infer_expr(expr); }
+                if let Some(ref mut expr) = end { self.type_infer_expr(expr); }
+                self.type_infer_block(block);
+                self.stack.pop_scope();
+            },
+            Statement::Expr(ref mut inner) | Statement::Return(ref mut inner) => self.type_infer_expr(inner),
+            Statement::Defer => {}
+        }
+    }
+
     fn type_infer_function(&mut self, func: &mut Function) {
-        
+        self.stack.push(&func.block.scope);
+
+        for arg in func.args.iter_mut() {
+            if let Some(ref mut val) = arg.val {
+                self.type_infer_expr(val);
+                // and now we can set our type to the inferred type
+                arg.decl_type = val.type_annot.clone();
+            }
+        }
+
+        for expr in func.block.exprs.iter_mut() {
+            // type checking for return types are done later
+            self.type_infer_statement(expr);
+        }
+
+        self.stack.pop_scope();
     }
 }

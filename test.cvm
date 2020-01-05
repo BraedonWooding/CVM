@@ -56,7 +56,7 @@ fn<T> find_odd(list: List<T>) -> List<T> {
 // because often more efficient to stack allocate
 // So no 'free list' here...
 fn<T> freeList(list: List<T>) {
-  for cur := list.head; cur != NULL; {
+  for cur := list.head; cur != null; {
     tmp := cur.next;
     free(cur);
     cur = tmp;
@@ -77,7 +77,7 @@ fn main(argc: int, argv: **char) -> int {
         appendList(list, i);
     }
 
-    output := findOdd(list);
+    output := find_odd(list);
 
     // we can use 'print' to print complex stuff it'll convert
     // it to a printf (and some other functions for objects)
@@ -93,6 +93,8 @@ fn<T, U> transform(data: *T, length: size_t, func: fn (T) -> U) -> *U {
   // 'new' always mallocs arrays
   res := new() {1, 2, 3};
 
+  k := 0;
+
   // 'i' will automatically be size_t for us
     // no more unsigned vs signed awfulness...
     for i := 0; i < length; i += 1 {
@@ -103,7 +105,7 @@ fn<T, U> transform(data: *T, length: size_t, func: fn (T) -> U) -> *U {
 }
 
 fn arrays_and_lambdas() {
-  // creating stack allocated arrays
+    // creating stack allocated arrays
     // length_of to get the length of a static array
     // you can use '=>' to just take a single expression
     // effectively it maps to just { return expr; }
@@ -122,4 +124,4 @@ fn arrays_and_lambdas() {
 
     // you must use parentheses when mixing pointers and arrays
     // to avoid ambiguity!
-}   
+}

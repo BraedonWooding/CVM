@@ -338,22 +338,15 @@ impl Transpiler {
                 // just chuck the []
             },
             ParsedType::Pointer(inner) => {
-                match **inner {
-                    ParsedType::Var{..} | ParsedType::Pointer(..) | ParsedType::Fresh{..} | ParsedType::Func{..} => {
-                        // simple types are no-ops
-                    },
-                    _ => {
-                        // else we have a complex type (array)
-                        // so we need to close the (*
-                        self.builder += ")";
-                    }
+                if let ParsedType::Array{..} = **inner {
+                    self.builder += ")";
                 }
                 self.transpile_type_rhs(&inner);
             },
             ParsedType::Var{..} => { /* no op */ },
             ParsedType::Func{args, ret, ..} => {
                 self.builder += ")(";
-                if args.len() > 0 {
+                if !args.is_empty() {
                     for (i, arg) in args.iter().enumerate() {
                         self.transpile_type(&arg);
                         if i < args.len() - 1 { self.builder += ","; }

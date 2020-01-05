@@ -133,7 +133,6 @@ macro_rules! parse_binop {
                 })
             };
             _ => {
-                info!("No binop {:?} :(... token was {:?}", stringify!($lhs_parse), $self.it.peek());
                 Some(lhs)
             }
         })
@@ -200,7 +199,7 @@ enum TopLevel {
 }
 
 impl<'a> Parser<'a> {
-    pub fn parse_program(stream: Lexer<'a>) -> Option<Program> {
+    pub fn parse_program(stream: Lexer<'a>) -> (Option<Program>, ScopeStack) {
         let mut program = Program {
             top_scope: Rc::new(RefCell::new(Scope::default())),
             structs: HashMap::new(),
@@ -211,12 +210,13 @@ impl<'a> Parser<'a> {
             stack: ScopeStack::new(&program.top_scope)
         };
         while parser.it.peek().is_some() {
-            match parser.parse_top_level()? {
-                TopLevel::StructDecl(decl) => { program.structs.insert(decl.id.to_string(), decl); },
-                TopLevel::FuncDecl(decl) => { program.functions.insert(decl.name.to_string(), decl); }
+            match parser.parse_top_level() {
+                Some(TopLevel::StructDecl(decl)) => { program.structs.insert(decl.id.to_string(), decl); },
+                Some(TopLevel::FuncDecl(decl)) => { program.functions.insert(decl.name.to_string(), decl); },
+                None => return (None, parser.stack)
             }
         }
-        Some(program)
+        (Some(program), parser.stack)
     }
 
     fn parse_top_level(&mut self) -> Option<TopLevel> {
@@ -301,7 +301,7 @@ impl<'a> Parser<'a> {
                 let (mut ty, has_type) = if !peek_expect!(self.it, TokenKind::Assign) {
                     (self.parse_type()?, true)
                 } else {
-                    (Scope::new_fresh_type(), false)
+                    (ScopeStack::new_fresh_type(), false)
                 };
 
                 // we have to write an the variable here
@@ -440,7 +440,7 @@ impl<'a> Parser<'a> {
                 let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
                     Box::new(self.parse_type()?)
                 } else {
-                    Box::new(Scope::new_fresh_type())
+                    Box::new(ScopeStack::new_fresh_type())
                 };
 
                 ParsedType::Func{args, ret, gen_args}
@@ -582,7 +582,7 @@ impl<'a> Parser<'a> {
             TokenKind::Sizeof => {
                 // sizeof.<T>(t)
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
+                let ty = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
                 if gen_args.len() > 0 {
                     warn!("'sizeof' takes up to 1 type argument (the type of it's object)");
                     return None;
@@ -599,7 +599,7 @@ impl<'a> Parser<'a> {
             },
             TokenKind::New => {
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
+                let ty = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
                 if gen_args.len() > 0 {
                     warn!("'new' only takes a single type argument (type to allocate)");
                     return None;
@@ -624,8 +624,8 @@ impl<'a> Parser<'a> {
             TokenKind::Cast => {
                 // just a function ... like cast.<Out, In>(in: In)
                 let mut gen_args = self.parse_gentype_list()?;
-                let to = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
-                let from = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
+                let to = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
+                let from = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
                 if gen_args.len() > 0 {
                     warn!("'cast' takes up to 2 type arguments (to and from)");
                     return None;
@@ -819,7 +819,7 @@ impl<'a> Parser<'a> {
         self.stack.push_new();
         // reserve ret type
         // the type checker will unify this with all the actual return types
-        let ret = Scope::new_fresh_type();
+        let ret = ScopeStack::new_fresh_type();
 
         let mut args = if try_expect!(self.it, TokenKind::LParen).is_some() {
             // arg list
@@ -862,7 +862,7 @@ impl<'a> Parser<'a> {
         // This does introduce type variable pollution so we probably want to at one point
         // introduce a new type variable class called TempTypeVar that is not intended to last longer than
         // a declaration so that we don't have to waste a ton of letters on functions
-        let (fresh, fresh_id) = if let ParsedType::Fresh{id} = Scope::new_fresh_type() {
+        let (fresh, fresh_id) = if let ParsedType::Fresh{id} = ScopeStack::new_fresh_type() {
             (ParsedType::Fresh{id}, id)
         } else {
             warn!("Internal error new_fresh_type returned a non fresh type");
@@ -883,7 +883,7 @@ impl<'a> Parser<'a> {
         let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
             self.parse_type()?
         } else {
-            Scope::new_fresh_type()
+            ScopeStack::new_fresh_type()
         };
 
         // We instead push them here onto their scope
@@ -906,7 +906,7 @@ impl<'a> Parser<'a> {
         self.stack.pop_scope();
 
         let func = ParsedType::Func { args: arg_types, ret: Box::new(ret.clone()), gen_args: gen_args.clone() };
-        self.stack.top().borrow_mut().set_fresh(fresh_id, func);
+        self.stack.set_fresh(fresh_id, func);
         Some(Function { gen_args, name, args, block, ret })
     }
 }
