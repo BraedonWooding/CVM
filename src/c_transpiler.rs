@@ -1,6 +1,4 @@
 use crate::compiler::ast::*;
-use crate::compiler::lexer::*;
-use crate::compiler::parser::*;
 
 extern crate log;
 use log::{info, trace, warn};
@@ -8,11 +6,12 @@ use log::{info, trace, warn};
 pub struct Transpiler {
     depth: usize,
     builder: String,
+    alpha_types: bool
 }
 
 impl Transpiler {
-    pub fn new() -> Transpiler {
-        Transpiler { depth: 0, builder: String::from("") }
+    pub fn new(alpha_types: bool) -> Transpiler {
+        Transpiler { depth: 0, builder: String::from(""), alpha_types }
     }
 
     pub fn get_output<'a>(&'a self) -> &'a str {
@@ -76,8 +75,8 @@ impl Transpiler {
                 self.transpile_block(&block);
                 self.builder += "\n";
             },
-            Statement::Defer(..) => {
-                warn!("Defer wasn't removed in the pre-transpilation step...");
+            Statement::Defer => {
+                // NOTE: Defers are just ignored
             },
             Statement::Expr(expr) => {
                 self.transpile_expr(&expr);
@@ -92,12 +91,7 @@ impl Transpiler {
     }
 
     fn transpile_func_decl(&mut self, decl: &Function) {
-        if decl.ret.is_some() {
-            self.transpile_type(decl.ret.as_ref().unwrap());
-        } else {
-            warn!("Function {} missing return type", decl.name);
-            self.builder += "???";
-        }
+        self.transpile_type(&decl.ret);
         self.builder += &format!(" {}(", decl.name);
         // write arguments
         for (i, arg) in decl.args.iter().enumerate() {
@@ -210,9 +204,14 @@ impl Transpiler {
                 }
                 self.builder += ")";
             },
-            ExprKind::Cast{..} => {
-                // TODO
-                self.builder += "???";
+            ExprKind::Cast{to, obj, ..} => {
+                // we are going to write it as (to)(obj)
+                // this will just make sure no nasty precedence exists
+                self.builder += "(";
+                self.transpile_type(to);
+                self.builder += ")(";
+                self.transpile_expr(&obj);
+                self.builder += ")";
             },
             ExprKind::Index(obj, index) => {
                 self.transpile_expr(&obj);
@@ -220,9 +219,11 @@ impl Transpiler {
                 self.transpile_expr(&index);
                 self.builder += "]";
             },
-            ExprKind::Sizeof(..) => {
-                // TODO
-                self.builder += "???";
+            ExprKind::Sizeof(ty, ..) => {
+                // always choose the type
+                self.builder += "sizeof(";
+                self.transpile_type(&ty);
+                self.builder += ")";
             },
             ExprKind::Binop(lhs, op, rhs) => {
                 self.transpile_expr(&lhs);
@@ -268,16 +269,16 @@ impl Transpiler {
     // just write the lhs of the type
     // i.e. for C type => int (*a3)[8]
     // it'll just write the int (*
-    fn transpile_type_lhs(&mut self, ty: &Type) {
+    fn transpile_type_lhs(&mut self, ty: &ParsedType) {
         match ty {
-            Type::Array{inner, ..} => {
+            ParsedType::Array{inner, ..} => {
                 self.transpile_type_lhs(&inner);
                 // no other logic
             },
-            Type::Pointer(inner) => {
+            ParsedType::Pointer(inner) => {
                 self.transpile_type_lhs(&inner);
                 match **inner {
-                    Type::Var{..} | Type::Pointer(..) | Type::Fresh{..} | Type::Func{..} => {
+                    ParsedType::Var{..} | ParsedType::Pointer(..) | ParsedType::Fresh{..} | ParsedType::Func{..} => {
                         // simple type we just add a '*' afterwards
                         self.builder += "*";
                     },
@@ -288,48 +289,57 @@ impl Transpiler {
                     }
                 }
             },
-            Type::Var{id, gen_args} => {
+            ParsedType::Var{id, gen_args} => {
                 // NOTE: Ignoring gen args for now..
                 if gen_args.len() > 0 {
                     warn!("Generic args on structs aren't supported for C transpilation yet...");
                 }
                 self.builder += &id;
             },
-            Type::Func{args: _, ret, ..} => {
-                match ret {
-                    Some(ty) => self.transpile_type_lhs(&ty),
-                    None => {
-                        warn!("No return type for function");
-                        self.builder += "???";
-                    }
-                }
+            ParsedType::Func{ret, ..} => {
+                self.transpile_type_lhs(&ret);
                 self.builder += &format!("(*");
             },
-            Type::Fresh{..} => {
-                warn!("Fresh variables not supported for printing yet");
-                self.builder += "???";
+            ParsedType::Fresh{id} => {
+                if self.alpha_types {
+                    // generate type name as $a $b $c
+                    // and so on...
+                    let mut text = String::new();
+                    let mut num = *id;
+                    loop {
+                        let c = std::char::from_u32((num % 26) as u32 + b'a' as u32).unwrap();
+                        num /= 26;
+                        text.insert(0, c);
+                        if num == 0 { break; }
+                        num -= 1;
+                    }
+                    self.builder += &text;
+                } else {
+                    self.builder += "$_";
+                    self.builder += &id.to_string();
+                }
             }
         }
     }
 
-    pub fn transpile_type(&mut self, ty: &Type) {
+    pub fn transpile_type(&mut self, ty: &ParsedType) {
         self.transpile_type_lhs(&ty);
         self.transpile_type_rhs(&ty);
     }
 
     // NOTE: we do inner after ourselves in rhs
-    fn transpile_type_rhs(&mut self, ty: &Type) {
+    fn transpile_type_rhs(&mut self, ty: &ParsedType) {
         match ty {
-            Type::Array{inner, len} => {
+            ParsedType::Array{inner, len} => {
                 self.builder += "[";
                 self.transpile_expr(len);
                 self.builder += "]";
                 self.transpile_type_rhs(&inner);
                 // just chuck the []
             },
-            Type::Pointer(inner) => {
+            ParsedType::Pointer(inner) => {
                 match **inner {
-                    Type::Var{..} | Type::Pointer(..) | Type::Fresh{..} | Type::Func{..} => {
+                    ParsedType::Var{..} | ParsedType::Pointer(..) | ParsedType::Fresh{..} | ParsedType::Func{..} => {
                         // simple types are no-ops
                     },
                     _ => {
@@ -340,8 +350,8 @@ impl Transpiler {
                 }
                 self.transpile_type_rhs(&inner);
             },
-            Type::Var{..} => { /* no op */ },
-            Type::Func{args, ret, ..} => {
+            ParsedType::Var{..} => { /* no op */ },
+            ParsedType::Func{args, ret, ..} => {
                 self.builder += ")(";
                 if args.len() > 0 {
                     for (i, arg) in args.iter().enumerate() {
@@ -352,15 +362,9 @@ impl Transpiler {
                     self.builder += "void";
                 }
                 self.builder += ")";
-                match ret {
-                    Some(ty) => self.transpile_type_rhs(&ty),
-                    None => {
-                        warn!("No return type for function");
-                        self.builder += "???";
-                    }
-                }
+                self.transpile_type_rhs(&ret);
             },
-            Type::Fresh{..} => { }
+            ParsedType::Fresh{..} => { }
         }
     }
 
@@ -372,12 +376,12 @@ impl Transpiler {
                 self.builder += " ";
             },
             None => {
-                warn!("decl type for decl with id {} is none... replacing type with ???", decl.id);
+                warn!("decl type for decl with id {} is none... replacing type with ???", decl.name);
                 self.builder += "??? ";
             }
         }
 
-        self.builder += &decl.id;
+        self.builder += &decl.name;
         if decl.decl_type.is_some() {
             self.transpile_type_rhs(&decl.decl_type.as_ref().unwrap());
         }
@@ -403,13 +407,6 @@ impl Transpiler {
         self.end_scope("}\n");
     }
 
-    fn transpile_top_level(&mut self, top_level: &TopLevel) {
-        match top_level {
-            TopLevel::StructDecl(decl) => self.transpile_struct_decl(&decl),
-            TopLevel::FuncDecl(decl) => self.transpile_func_decl(&decl)
-        }
-    }
-
     fn transpile_block(&mut self, block: &Block) {
         self.begin_scope("{\n");
         for statement in block.exprs.as_slice() {
@@ -421,8 +418,13 @@ impl Transpiler {
     }
 
     pub fn transpile_program(&mut self, program: &Program) {
-        for statement in program.top_level.as_slice() {
-            self.transpile_top_level(&statement);
+        for decl in program.structs.values() {
+            self.transpile_struct_decl(decl);
+            self.builder += "\n";
+        }
+
+        for decl in program.functions.values() {
+            self.transpile_func_decl(decl);
             self.builder += "\n";
         }
     }

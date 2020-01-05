@@ -7,37 +7,46 @@
    to ensure the expressions are valid we get less safety
  */
 
+use crate::compiler::scope::Scope;
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 pub type Ident = String;
 pub type IdentList = Vec<Ident>;
 pub type DeclList = Vec<Decl>;
 
-#[derive(Default, Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
-    pub top_level: Vec<TopLevel>,
+    pub functions: HashMap<Ident, Function>,
+    pub structs: HashMap<Ident, Struct>,
+    pub top_scope: Rc<RefCell<Scope>>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Block {
+    pub scope: Rc<RefCell<Scope>>,
     pub exprs: Vec<Statement>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub gen_args: IdentList,
     pub name: Ident,
     pub args: DeclList,
-    pub ret: Option<Type>,
+    pub ret: ParsedType,
     // short hand => is converted to a return block
     pub block: Block,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Lambda {
     pub args: DeclList,
     pub block: Block,
+    pub ret: ParsedType
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Struct {
     pub id: Ident,
     pub gen_args: IdentList,
@@ -45,27 +54,27 @@ pub struct Struct {
     pub decls: DeclList,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Decl {
-    pub id: Ident,
-    pub decl_type: Option<Type>,
+    pub name: Ident,
+    pub decl_type: Option<ParsedType>,
     pub val: Option<Expr>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Statement {
     If{if_cond: Box<Expr>, if_block: Block, else_if: Vec<(Expr, Block)>, else_block: Option<Block>},
     While(Box<Expr>, Block),
     For(Option<Box<Expr>>, Option<Box<Expr>>, Option<Box<Expr>>, Block),
-    Defer(Block),
     Expr(Expr),
-    Return(Expr)
+    Return(Expr),
+    Defer // not used really...
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub kind: ExprKind,
-    pub type_annot: Option<Type>
+    pub type_annot: Option<ParsedType>
 }
 
 impl Expr {
@@ -93,26 +102,27 @@ impl Expr {
     }
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum Initialiser {
     Key{key: Ident, val: Vec<Initialiser>},
     Val{val: Expr}
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum ExprKind {
     Assign{lhs: Box<Expr>, rhs: Box<Expr>, kind: AssignmentKind},
     Decl(Box<Decl>),
-    New(Option<Type>, Option<Box<Expr>>, Vec<Initialiser>),
+    New(ParsedType, Option<Box<Expr>>, Vec<Initialiser>),
     Unary(Vec<UnaryKind>, Box<Expr>),
     Paren(Box<Expr>),
     Var(Ident),
     Member(Box<Expr>, Ident),
-    GenFuncCall(Ident, Vec<Type>, Vec<Expr>),
+    // NOTE: you can't call lambdas this way
+    GenFuncCall(Ident, Vec<ParsedType>, Vec<Expr>),
     FuncCall(Box<Expr>, Vec<Expr>),
-    Cast{to: Option<Type>, from: Option<Type>, obj: Box<Expr>},
+    Cast{to: ParsedType, from: ParsedType, obj: Box<Expr>},
     Index(Box<Expr>, Box<Expr>),
-    Sizeof(Vec<Type>, Option<Box<Expr>>),
+    Sizeof(ParsedType, Option<Box<Expr>>),
     Binop(Box<Expr>, BinopKind, Box<Expr>),
     Ternary{cond: Box<Expr>, if_true: Box<Expr>, if_false: Box<Expr>},
     Constant(ConstantKind),
@@ -122,7 +132,7 @@ pub enum ExprKind {
     Uninitialiser,
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum ConstantKind {
     // only one supported so far
     Int32(i32),
@@ -135,19 +145,18 @@ pub enum ConstantKind {
     Bool(bool),
 }
 
-#[derive(Debug, EnumAsInner)]
-pub enum Type {
-    Pointer(Box<Type>),
-    Array {inner: Box<Type>, len: Box<Expr>},
-    Var {id: Ident, gen_args: Vec<Type>},
+#[derive(Debug, EnumAsInner, Clone)]
+pub enum ParsedType {
+    Pointer(Box<ParsedType>),
+    Array {inner: Box<ParsedType>, len: Box<Expr>},
+    Var {id: Ident, gen_args: Vec<ParsedType>},
     Fresh {id: usize},
-
     // we don't care about the ids for function types
     // but we do care about the function name.
-    Func {args: Vec<Type>, ret: Option<Box<Type>>, gen_args: Vec<Ident>}
+    Func {args: Vec<ParsedType>, ret: Box<ParsedType>, gen_args: Vec<Ident>}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinopKind {
     BitOr,
     BitAnd,
@@ -169,7 +178,7 @@ pub enum BinopKind {
     Mod,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnaryKind {
     BitNot,
     Not,
@@ -179,7 +188,7 @@ pub enum UnaryKind {
     Neg
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AssignmentKind {
     Assign,
     MulAssign,
@@ -192,11 +201,5 @@ pub enum AssignmentKind {
     BitAndAssign,
     BitXorAssign,
     BitOrAssign
-}
-
-#[derive(Debug, EnumAsInner)]
-pub enum TopLevel {
-    StructDecl(Box<Struct>),
-    FuncDecl(Box<Function>),
 }
 

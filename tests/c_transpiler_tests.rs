@@ -3,19 +3,19 @@ use cvm_lib::*;
 
 macro_rules! create_type {
     (Var $id:tt) => {
-        Type::Var { id: $id.to_string(), gen_args: vec![] }
+        ParsedType::Var { id: $id.to_string(), gen_args: vec![] }
     };
     (Pointer ($($inner:tt)+)) => {
-        Type::Pointer(Box::new(create_type!($($inner) +)))
+        ParsedType::Pointer(Box::new(create_type!($($inner) +)))
     };
     (Array [$len:expr] ($($inner:tt)+)) => {
-        Type::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
+        ParsedType::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
     };
     (Fresh $id:tt) => {
-        Type::Fresh { id:$id }
+        ParsedType::Fresh { id:$id }
     };
     (Func $(($($args:tt)+)),* -> $($ret:tt)+) => {
-        Type::Func{name: None, args: vec![$(create_type!($($args)+)),*], ret: Some(Box::new(create_type!($($ret)+))), gen_args: vec![]}
+        ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+)), gen_args: vec![]}
     };
 }
 
@@ -44,7 +44,7 @@ macro_rules! test_type {
     { $($type:expr => $val:expr),+ } => {
         $({
             let ty = $type;
-            let mut transpiler = Transpiler::new();
+            let mut transpiler = Transpiler::new(false);
             transpiler.transpile_type(&ty);
             assert_eq!(transpiler.get_output(), $val);
         });+
@@ -60,7 +60,11 @@ fn type_tests() {
         create_type!(Array[create_constant!(Int 5)] (Pointer (Var "int"))) => "int*[5]",
         create_type!(Func (Var "int"), (Pointer (Var "double")),
                            (Array[create_constant!(Int 5)] (Pointer (Var "int")))
-                    -> Var "void") => "void(*func_TODO_NO_NAME)(int,double*,int*[5])",
-        create_type!(Func -> Pointer (Array[create_constant!(Int 3)] (Var "int"))) => "int(*(*func_TODO_NO_NAME)(void))[3]"
+                    -> Var "void") => "void(*)(int,double*,int*[5])",
+        // NOTE: this test and the above one may seem weird...
+        //       because there is no function name but that is what they are meant to be
+        //       for example in a cast you don't include the function name
+        //       the only case you do is declarations!
+        create_type!(Func -> Pointer (Array[create_constant!(Int 3)] (Var "int"))) => "int(*(*)(void))[3]"
     }
 }

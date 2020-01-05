@@ -34,6 +34,7 @@ fn main() -> std::io::Result<()> {
                  --typed-ast        'Fully resolve all types'
                  --bytecode         'Print out the resultant bytecode'
                  --transpile-c      'Transpile the AST to C'
+                 --alpha-types      'Use alphabetical type names for fresh type variables'
                  <INPUT>            'Sets the input file to use'")
         )
         .get_matches();
@@ -55,7 +56,10 @@ fn main() -> std::io::Result<()> {
             // most steps require the previous ones to exist
             // so we always generate each step... it is just more that
             // we print out the itermediaries at each point
-            let ast = Parser::parse_program(lexer);
+            let mut ast = match Parser::parse_program(lexer) {
+                Some(ast) => ast,
+                None => return Ok(()),
+            };
 
             if sub_matches.is_present("ast") {
                 println!("== AST Output Started ==");
@@ -63,10 +67,18 @@ fn main() -> std::io::Result<()> {
                 println!("== AST Output Finished ==");
             }
 
-            if sub_matches.is_present("transpile-c") && ast.is_some() {
+            TypeInfer::type_infer_program(&mut ast);
+
+            if sub_matches.is_present("basic-typed-ast") {
+                println!("== Basic Typed AST Started ==");
+                println!("{:?}", ast);
+                println!("== Basic Typed AST Finished ==");
+            }
+
+            if sub_matches.is_present("transpile-c") {
                 println!("== Transpilation to C Started ==");
-                let mut transpiler = c_transpiler::Transpiler::new();
-                transpiler.transpile_program(&ast.unwrap());
+                let mut transpiler = c_transpiler::Transpiler::new(sub_matches.is_present("alpha-types"));
+                transpiler.transpile_program(&ast);
                 let output = transpiler.get_output();
                 println!("== Transpilation to C Finished ==");
                 println!("== Result of C Transpilation Started ==");

@@ -1,12 +1,17 @@
 use super::lexer::*;
 use super::ast::*;
 use crate::logger::*;
+use super::scope::*;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 extern crate log;
-use log::{info, trace, warn};
+use log::{info, warn};
 
 pub struct Parser<'a> {
     it: std::iter::Peekable<Lexer<'a>>,
+    stack: ScopeStack
 }
 
 macro_rules! expect {
@@ -188,23 +193,36 @@ fn token_kind_to_unary(tok: &TokenKind) -> Option<UnaryKind> {
     }
 }
 
+#[derive(Debug)]
+enum TopLevel {
+    StructDecl(Struct),
+    FuncDecl(Function)
+}
+
 impl<'a> Parser<'a> {
     pub fn parse_program(stream: Lexer<'a>) -> Option<Program> {
+        let mut program = Program {
+            top_scope: Rc::new(RefCell::new(Scope::default())),
+            structs: HashMap::new(),
+            functions: HashMap::new(),
+        };
         let mut parser = Parser::<'a> {
             it: stream.peekable(),
+            stack: ScopeStack::new(&program.top_scope)
         };
-        let mut program = Program::default();
         while parser.it.peek().is_some() {
-            program.top_level.push(parser.parse_top_level()?);
+            match parser.parse_top_level()? {
+                TopLevel::StructDecl(decl) => { program.structs.insert(decl.id.to_string(), decl); },
+                TopLevel::FuncDecl(decl) => { program.functions.insert(decl.name.to_string(), decl); }
+            }
         }
-
         Some(program)
     }
 
     fn parse_top_level(&mut self) -> Option<TopLevel> {
         expect_match!(self.it, _tok, {
-            TokenKind::Function => Some(TopLevel::FuncDecl(Box::new(self.parse_function()?))),
-            TokenKind::Struct => Some(TopLevel::StructDecl(Box::new(self.parse_struct()?)));
+            TokenKind::Function => Some(TopLevel::FuncDecl(self.parse_function()?)),
+            TokenKind::Struct => Some(TopLevel::StructDecl(self.parse_struct()?));
             _ => {
                 warn!("Unknown top level... {:?}", self.it.peek());
                 return None;
@@ -213,18 +231,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_if(&mut self) -> Option<Statement> {
+        self.stack.push_new();
         let if_cond = Box::new(self.parse_conditional()?);
-        let if_block = self.parse_block()?;
+        let if_block = self.parse_block(false)?;
+        self.stack.pop_scope();
         let mut else_if = vec![];
         let mut else_block = None;
 
         while try_expect!(self.it, TokenKind::Else).is_some() {
             if try_expect!(self.it, TokenKind::If).is_some() {
+                self.stack.push_new();
                 let cond = self.parse_conditional()?;
-                let block = self.parse_block()?;
+                let block = self.parse_block(false)?;
                 else_if.push((cond, block));
+                self.stack.pop_scope();
             } else {
-                else_block = Some(self.parse_block()?);
+                else_block = Some(self.parse_block(true)?);
                 break;
             }
         };
@@ -233,25 +255,34 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_while(&mut self) -> Option<Statement> {
+        self.stack.push_new();
         let cond = self.parse_conditional()?;
-        let block = self.parse_block()?;
+        let block = self.parse_block(false)?;
+        self.stack.pop_scope();
 
         Some(Statement::While(Box::new(cond), block))
     }
 
     fn parse_defer(&mut self) -> Option<Statement> {
-        Some(Statement::Defer(self.parse_block()?))
+        match self.parse_block(true) {
+            Some(block) => {
+                self.stack.cur().borrow_mut().defer_exprs.push(block);
+                Some(Statement::Defer)
+            }
+            None => None
+        }
     }
 
     fn parse_for(&mut self) -> Option<Statement> {
-        let init = parse_or_token!(self, parse_expr, TokenKind::SemiColon, "';'")
-            .map(|x| Box::new(x));
-        let cond = parse_or_token!(self, parse_conditional, TokenKind::SemiColon, "';'")
-            .map(|x| Box::new(x));
+        self.stack.push_new();
+        let init = parse_or_token!(self, parse_expr, TokenKind::SemiColon, "';'").map(Box::new);
+        let cond = parse_or_token!(self, parse_conditional, TokenKind::SemiColon, "';'").map(Box::new);
         let step = if peek_expect!(self.it, TokenKind::LBrace) { None }
                    else { Some(Box::new(self.parse_expr()?)) };
+        let block = self.parse_block(false)?;
+        self.stack.pop_scope();
 
-        Some(Statement::For(init, cond, step, self.parse_block()?))
+        Some(Statement::For(init, cond, step, block))
     }
 
     fn parse_expr(&mut self) -> Option<Expr> {
@@ -259,31 +290,39 @@ impl<'a> Parser<'a> {
         if lhs.is_unary() {
             // possible declaration
             if try_expect!(self.it, TokenKind::Colon).is_some() {
-                let id = match lhs.kind {
-                    ExprKind::Var(id) => id,
+                let name = match lhs.kind {
+                    ExprKind::Var(name) => name,
                     kind => {
                         warn!("You can't declare a non variable {:?}", kind);
                         return None;
                     }
                 };
 
-                let ty = if !peek_expect!(self.it, TokenKind::Assign) {
-                    Some(self.parse_type()?)
+                let (mut ty, has_type) = if !peek_expect!(self.it, TokenKind::Assign) {
+                    (self.parse_type()?, true)
                 } else {
-                    None
+                    (Scope::new_fresh_type(), false)
                 };
+
+                // we have to write an the variable here
+                // because else the value can't refer to itself
+                // which blocks recursive lambdas
+                ty = self.stack.cur().borrow_mut().new_var(name.to_string(), Some(ty))
+                                                  .expect("Multiple variables with the same name {{TODO}} better msg");
+               
                 let rhs = if try_expect!(self.it, TokenKind::Assign).is_some() {
                     Some(self.parse_conditional()?)
-                } else if ty.is_some() {
+                } else if has_type {
                     None
                 } else {
-                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int");
+                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int for name {}", name);
                     return None;
                 };
+
                 Some(Expr { type_annot: None,
                     kind: ExprKind::Decl(Box::new(Decl {
-                        id: id,
-                        decl_type: ty,
+                        name: name,
+                        decl_type: Some(ty),
                         val: rhs
                     }))})
             } else {
@@ -325,14 +364,11 @@ impl<'a> Parser<'a> {
         });
 
         let is_return = try_expect!(self.it, TokenKind::Return).is_some();
-        let mut inner = self.parse_expr()?;
+        let inner = self.parse_expr()?;
         if is_return {
-            match inner.kind {
-                ExprKind::Assign{..} => {
-                    warn!("Can't return a non conditional (i.e. don't return assignments)");
-                    return None;
-                },
-                _ => {}
+            if let ExprKind::Assign{..} = inner.kind {
+                warn!("Can't return a non conditional (i.e. don't return assignments)");
+                return None;
             }
         }
 
@@ -341,19 +377,25 @@ impl<'a> Parser<'a> {
         Some(if is_return { Statement::Return(inner) } else { Statement::Expr(inner) })
     }
 
-    fn parse_block(&mut self) -> Option<Block> {
-        warn!("BLK: {:?}", self.it.peek());
+    fn parse_block(&mut self, create_scope: bool) -> Option<Block> {
         eat!(self.it, TokenKind::LBrace, "'{'");
         let mut list = vec![];
 
+        if create_scope {
+            self.stack.push_new();
+        }
+
         // NOTE: This supports an extra trailing comma
         while !peek_expect!(self.it, TokenKind::RBrace) {
-            info!("ONe more loop... {:?}", self.it.peek());
             list.push(self.parse_statement()?);
         }
 
         eat!(self.it, TokenKind::RBrace, "'}'");
-        Some(Block { exprs: list })
+        let scope = Rc::clone(&self.stack.cur());
+        if create_scope {
+            self.stack.pop_scope();
+        }
+        Some(Block { scope: scope, exprs: list })
     }
 
     fn parse_id(&mut self) -> Option<Ident> {
@@ -364,11 +406,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_type(&mut self) -> Option<Type> {
+    fn parse_type(&mut self) -> Option<ParsedType> {
         let mut ty = expect_match!(self.it, tok, {
             TokenKind::Asterix => {
                 // pointer type
-                Type::Pointer(Box::new(self.parse_type()?))
+                ParsedType::Pointer(Box::new(self.parse_type()?))
             },
             TokenKind::LParen => {
                 let ty = self.parse_type()?;
@@ -384,7 +426,7 @@ impl<'a> Parser<'a> {
                 } else {
                     vec![]
                 };
-                Type::Var{id: tok.kind.into_ident().unwrap(), gen_args}
+                ParsedType::Var{id: tok.kind.into_ident().unwrap(), gen_args}
             },
             TokenKind::Function => {
                 let gen_args = if try_expect!(self.it, TokenKind::LAngle).is_some() {
@@ -396,12 +438,12 @@ impl<'a> Parser<'a> {
                 eat!(self.it, TokenKind::LParen, "'('");
                 let args = parse_list!(self, parse_type, TokenKind::Comma, TokenKind::RParen, "')'");
                 let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
-                    Some(Box::new(self.parse_type()?))
+                    Box::new(self.parse_type()?)
                 } else {
-                    None
+                    Box::new(Scope::new_fresh_type())
                 };
 
-                Type::Func{args, ret, gen_args}
+                ParsedType::Func{args, ret, gen_args}
             };
             _ => {
                 warn!("Was expecting a type but instead found (TODO: put token found here)");
@@ -412,7 +454,7 @@ impl<'a> Parser<'a> {
         while try_expect!(self.it, TokenKind::LBracket).is_some() {
             let len = self.parse_conditional()?;
             eat!(self.it, TokenKind::RBracket, "']'");
-            ty = Type::Array{inner: Box::new(ty), len: Box::new(len)};
+            ty = ParsedType::Array{inner: Box::new(ty), len: Box::new(len)};
         }
 
         Some(ty)
@@ -516,7 +558,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_gentype_list(&mut self) -> Option<Vec<Type>> {
+    fn parse_gentype_list(&mut self) -> Option<Vec<ParsedType>> {
         Some(if try_expect!(self.it, TokenKind::Period).is_some() {
             eat!(self.it, TokenKind::LAngle, "'<'");
             parse_list!(self, parse_type, TokenKind::Comma, TokenKind::RAngle, "'>'")
@@ -537,9 +579,27 @@ impl<'a> Parser<'a> {
                 let id = tok.kind.into_ident().unwrap();
                 Expr { type_annot: None, kind: ExprKind::Var(id) }
             },
+            TokenKind::Sizeof => {
+                // sizeof.<T>(t)
+                let mut gen_args = self.parse_gentype_list()?;
+                let ty = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
+                if gen_args.len() > 0 {
+                    warn!("'sizeof' takes up to 1 type argument (the type of it's object)");
+                    return None;
+                }
+
+                eat!(self.it, TokenKind::LParen, "'('");
+                let mut args = parse_list!(self, parse_conditional, TokenKind::Comma, TokenKind::RParen, "')'");
+                if args.len() > 1 {
+                    warn!("'sizeof' takes up to a single function argument (object to get sizeof)");
+                    return None;
+                }
+                let obj = args.pop().map(Box::new);
+                Expr { type_annot: None, kind: ExprKind::Sizeof(ty, obj) }
+            },
             TokenKind::New => {
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop();
+                let ty = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
                 if gen_args.len() > 0 {
                     warn!("'new' only takes a single type argument (type to allocate)");
                     return None;
@@ -551,7 +611,7 @@ impl<'a> Parser<'a> {
                     warn!("'new' only takes a single function argument (allocator)");
                     return None;
                 }
-                let arg = args.pop().map(|x| Box::new(x));
+                let arg = args.pop().map(Box::new);
 
                 let init = if try_expect!(self.it, TokenKind::LBrace).is_some() {
                     parse_list!(self, parse_initialiser, TokenKind::Comma, TokenKind::RBrace, "'}'")
@@ -564,8 +624,8 @@ impl<'a> Parser<'a> {
             TokenKind::Cast => {
                 // just a function ... like cast.<Out, In>(in: In)
                 let mut gen_args = self.parse_gentype_list()?;
-                let to = gen_args.pop();
-                let from = gen_args.pop();
+                let to = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
+                let from = gen_args.pop().unwrap_or_else(Scope::new_fresh_type);
                 if gen_args.len() > 0 {
                     warn!("'cast' takes up to 2 type arguments (to and from)");
                     return None;
@@ -679,7 +739,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_decl(&mut self) -> Option<Decl> {
-        let id = self.parse_id()?;
+        let name = self.parse_id()?;
         // TODO: Should we force it to be a single token
         //       in the case of infer assignment i.e. don't allow id ': =' 2
         eat!(self.it, TokenKind::Colon, "':'");
@@ -697,7 +757,7 @@ impl<'a> Parser<'a> {
         };
 
         return Some(Decl {
-            id: id,
+            name: name,
             decl_type: decl_type,
             val: val
         })
@@ -729,7 +789,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_opt_decl(&mut self) -> Option<Decl> {
-        let id = self.parse_id()?;
+        let name = self.parse_id()?;
         let (decl_type, val) = if try_expect!(self.it, TokenKind::Colon).is_some() {
             let decl_type = if !peek_expect!(self.it, TokenKind::Assign) {
                 // NOTE: we have to propagate the failing here
@@ -749,11 +809,19 @@ impl<'a> Parser<'a> {
             (None, None)
         };
 
-        return Some(Decl { id, decl_type, val })
+        return Some(Decl { name, decl_type, val })
     }
 
     fn parse_lambda(&mut self) -> Option<Lambda> {
-        let args = if try_expect!(self.it, TokenKind::LParen).is_some() {
+        // lambdas can be recursive (including in arguments)
+        // butttt the declaration always pushes a temporary fresh
+        // before evaluating the value so we don't have to worry
+        self.stack.push_new();
+        // reserve ret type
+        // the type checker will unify this with all the actual return types
+        let ret = Scope::new_fresh_type();
+
+        let mut args = if try_expect!(self.it, TokenKind::LParen).is_some() {
             // arg list
             parse_list!(self, parse_opt_decl, TokenKind::Comma, TokenKind::RParen, "')'")
         } else {
@@ -761,14 +829,21 @@ impl<'a> Parser<'a> {
             vec![self.parse_opt_decl()?]
         };
 
+        for arg in args.iter_mut() {
+            self.stack.cur().borrow_mut()
+                .new_var(arg.name.to_string(), arg.decl_type.clone())
+                .expect("Variable already exists with variable name {TODO}");
+        }
+        
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
             let cond = self.parse_conditional()?;
-            Block { exprs: vec![Statement::Return(cond)] }
+            Block { exprs: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
         } else {
-            self.parse_block()?
+            self.parse_block(false)?
         };
 
-        Some(Lambda { args, block })
+        self.stack.pop_scope();
+        Some(Lambda { args, block, ret })
     }
 
     fn parse_function(&mut self) -> Option<Function> {
@@ -780,22 +855,59 @@ impl<'a> Parser<'a> {
 
         let name = self.parse_id()?;
 
-        eat!(self.it, TokenKind::LParen, "'('");
-        let args = parse_list!(self, parse_decl, TokenKind::Comma, TokenKind::RParen, "')'");
-        let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
-            Some(self.parse_type()?)
+        // since arguments could have default values relating to the function itself
+        // i.e. fn fib(n: usize, inner := fib) => n <= 1 ? 1 : inner(n - 1) + inner(n - 2)
+        // we have to put it in the public scope as a type variable 'a'
+        // then we can concrete it down better afterwards
+        // This does introduce type variable pollution so we probably want to at one point
+        // introduce a new type variable class called TempTypeVar that is not intended to last longer than
+        // a declaration so that we don't have to waste a ton of letters on functions
+        let (fresh, fresh_id) = if let ParsedType::Fresh{id} = Scope::new_fresh_type() {
+            (ParsedType::Fresh{id}, id)
         } else {
-            None
+            warn!("Internal error new_fresh_type returned a non fresh type");
+            return None
         };
+        self.stack.top().borrow_mut().new_var(name.to_string(), Some(fresh));
+
+        // push a new scope
+        self.stack.push_new();
+
+        eat!(self.it, TokenKind::LParen, "'('");
+
+        // do note that unlike the function name
+        // the arguments can't be self referential (i.e. you they can't refer to themselves)
+        // so you can't have something like fn fib(n: usize, actual: \n => n <= 1 ? 1 : actual(n - 1) + actual(n - 2) ) => actual(n)
+        // this may change in the future but currently isn't allowed
+        let mut args = parse_list!(self, parse_decl, TokenKind::Comma, TokenKind::RParen, "')'");
+        let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
+            self.parse_type()?
+        } else {
+            Scope::new_fresh_type()
+        };
+
+        // We instead push them here onto their scope
+        // we probably want to just do this inside a unique parse_decl
+        // ...
+        let mut arg_types = vec![];
+        for arg in args.iter_mut() {
+            arg_types.push(self.stack.cur().borrow_mut()
+                .new_var(arg.name.to_string(), arg.decl_type.clone())
+                .expect("Variable already exists with variable name {TODO}"));
+        }
 
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
             let cond = self.parse_conditional()?;
-            Block { exprs: vec![Statement::Return(cond)] }
+            Block { exprs: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
         } else {
-            self.parse_block()?
+            self.parse_block(false)?
         };
 
-        Some(Function { gen_args, name, args, ret, block })
+        self.stack.pop_scope();
+
+        let func = ParsedType::Func { args: arg_types, ret: Box::new(ret.clone()), gen_args: gen_args.clone() };
+        self.stack.top().borrow_mut().set_fresh(fresh_id, func);
+        Some(Function { gen_args, name, args, block, ret })
     }
 }
 

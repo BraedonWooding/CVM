@@ -269,7 +269,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn valid_identifier_continuer(c: char) -> bool {
-        return c.is_digit(10) || c.is_ascii_alphabetic() || c == '_';
+        c.is_digit(10) || c.is_ascii_alphabetic() || c == '_'
     }
 
     // Won't work if you try to match it to something that contains a newline
