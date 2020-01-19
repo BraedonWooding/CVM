@@ -234,7 +234,7 @@ impl<'a> Parser<'a> {
         self.stack.push_new();
         let if_cond = Box::new(self.parse_conditional()?);
         let if_block = self.parse_block(false)?;
-        self.stack.pop_scope();
+        self.stack.pop();
         let mut else_if = vec![];
         let mut else_block = None;
 
@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
                 let cond = self.parse_conditional()?;
                 let block = self.parse_block(false)?;
                 else_if.push((cond, block));
-                self.stack.pop_scope();
+                self.stack.pop();
             } else {
                 else_block = Some(self.parse_block(true)?);
                 break;
@@ -258,7 +258,7 @@ impl<'a> Parser<'a> {
         self.stack.push_new();
         let cond = self.parse_conditional()?;
         let block = self.parse_block(false)?;
-        self.stack.pop_scope();
+        self.stack.pop();
 
         Some(Statement::While(Box::new(cond), block))
     }
@@ -280,7 +280,7 @@ impl<'a> Parser<'a> {
         let step = if peek_expect!(self.it, TokenKind::LBrace) { None }
                    else { Some(Box::new(self.parse_expr()?)) };
         let block = self.parse_block(false)?;
-        self.stack.pop_scope();
+        self.stack.pop();
 
         Some(Statement::For(init, cond, step, block))
     }
@@ -372,7 +372,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // all statements taht aren't if/for/while/defer... require a semicolon
+        // all statements that aren't if/for/while/defer... require a semicolon
         eat!(self.it, TokenKind::SemiColon, "';'");
         Some(if is_return { Statement::Return(inner) } else { Statement::Expr(inner) })
     }
@@ -393,7 +393,7 @@ impl<'a> Parser<'a> {
         eat!(self.it, TokenKind::RBrace, "'}'");
         let scope = Rc::clone(&self.stack.cur());
         if create_scope {
-            self.stack.pop_scope();
+            self.stack.pop();
         }
         Some(Block { scope: scope, exprs: list })
     }
@@ -842,7 +842,7 @@ impl<'a> Parser<'a> {
             self.parse_block(false)?
         };
 
-        self.stack.pop_scope();
+        self.stack.pop();
         Some(Lambda { args, block, ret })
     }
 
@@ -903,7 +903,7 @@ impl<'a> Parser<'a> {
             self.parse_block(false)?
         };
 
-        self.stack.pop_scope();
+        self.stack.pop();
 
         let func = ParsedType::Func { args: arg_types, ret: Box::new(ret.clone()), gen_args: gen_args.clone() };
         self.stack.set_fresh(fresh_id, func);

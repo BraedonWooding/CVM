@@ -8,4 +8,5 @@ pub use compiler::lexer::*;
 pub use compiler::parser::*;
 pub use compiler::ast::*;
 pub use compiler::type_infer::*;
+pub use compiler::type_check::*;
 pub use c_transpiler::*;

@@ -75,7 +75,7 @@ fn main() -> std::io::Result<()> {
 
             if sub_matches.is_present("basic-typed-ast") {
                 println!("== Basic Typed AST Started ==");
-                println!("{:?}", ast);
+                println!("{:#?}", ast);
                 println!("== Basic Typed AST Finished ==");
             }
 

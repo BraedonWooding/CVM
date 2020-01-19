@@ -156,6 +156,12 @@ pub enum ParsedType {
     Func {args: Vec<ParsedType>, ret: Box<ParsedType>, gen_args: Vec<Ident>}
 }
 
+impl ParsedType {
+    pub fn new_simple_var_type(id: &str) -> ParsedType {
+        ParsedType::Var{id: id.to_string(), gen_args: vec![]}
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum BinopKind {
     BitOr,

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static FRESH_GENERATOR: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Scope {
     pub parent: Option<Rc<RefCell<Scope>>>,
     pub var_env: HashMap<Ident, Rc<RefCell<ParsedType>>>,
@@ -16,11 +16,28 @@ pub struct Scope {
     pub defer_exprs: Vec<Block>
 }
 
-#[derive(Debug)]
+#[derive(Default)]
+pub struct StructInfo {
+    pub members: Vec<(Ident, ParsedType)>,
+}
+
 pub struct ScopeStack {
     cur_scope: Rc<RefCell<Scope>>,
     top_scope: Rc<RefCell<Scope>>,
-    pub fresh_type_env: HashMap<usize, Rc<RefCell<ParsedType>>>
+    pub fresh_type_env: HashMap<usize, Rc<RefCell<ParsedType>>>,
+    pub stack_info: HashMap<Ident, StructInfo>
+}
+
+impl std::fmt::Debug for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Scope")
+    }
+}
+
+impl StructInfo {
+    pub fn find_member(&mut self, id: &Ident) {
+        self.members.iter().find(|&x| x.0 == *id);
+    }
 }
 
 impl ScopeStack {
@@ -28,8 +45,20 @@ impl ScopeStack {
         ScopeStack {
             top_scope: Rc::clone(&top),
             cur_scope: Rc::clone(&top),
-            fresh_type_env: HashMap::new()
+            fresh_type_env: HashMap::new(),
+            stack_info: HashMap::new(),
         }
+    }
+
+    pub fn has_struct(&self, id: &Ident) -> bool {
+        self.stack_info.contains_key(id)
+    }
+
+    pub fn new_struct(&mut self, id: &Ident) -> &mut StructInfo {
+        if !self.has_struct(id) {
+            self.stack_info.insert(id.to_string(), StructInfo::default());
+        }
+        self.stack_info.get_mut(id).unwrap()
     }
 
     pub fn new_fresh_type() -> ParsedType {
@@ -37,7 +66,7 @@ impl ScopeStack {
         ParsedType::Fresh{ id }
     }
 
-    pub fn set_fresh(&mut self, id: usize, new_ty: ParsedType) {
+    pub fn set_fresh(&mut self, id: usize, new_ty: ParsedType) -> ParsedType {
         // note if a -> b -> c
         // then we don't want to set 'a' we want to go to the end of the chain
         // and set 'c'
@@ -45,8 +74,9 @@ impl ScopeStack {
         let outer = self.lookup_fresh(id);
         let ty = outer.borrow();
         match *ty {
+            // a -> a is valid and default state for fresh
             ParsedType::Fresh{id: ref new_id} if *new_id != id => {
-                self.set_fresh(*new_id, new_ty);
+                self.set_fresh(*new_id, new_ty)
             },
             _ => {
                 // this is overriding the type TypeName = i32;
@@ -56,7 +86,7 @@ impl ScopeStack {
                 // they could be unified iff b <> c
                 // TODO:
                 drop(ty);
-                let _old = outer.replace(new_ty);
+                outer.replace(new_ty)
             }
         }
     }
@@ -101,7 +131,7 @@ impl ScopeStack {
         self.cur_scope = Rc::new(RefCell::new(scope));
     }
 
-    pub fn pop_scope(&mut self) -> Rc<RefCell<Scope>> {
+    pub fn pop(&mut self) -> Rc<RefCell<Scope>> {
         let copy = Rc::clone(&self.cur_scope);
         self.cur_scope = Rc::clone(copy.borrow_mut().parent.as_ref()
                                    .expect("All inner scopes must have a parent"));

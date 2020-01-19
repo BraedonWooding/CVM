@@ -1,0 +1,3 @@
+fn arrays_and_lambdas() {
+     defer { free(a2); }
+}

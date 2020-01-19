@@ -11,11 +11,20 @@ pub struct TypeInfer<'a> {
 
 impl<'a> TypeInfer<'a> {
     pub fn type_infer_program(program: &mut Program, stack: &'a mut ScopeStack) {
-        let mut checker = TypeInfer { stack };
+        let mut inferer = TypeInfer { stack };
+
+        for (key, value) in program.structs.iter_mut() {
+            if inferer.stack.has_struct(&key) {
+                warn!("Struct already defined!  {}", key);
+                continue;
+            }
+
+            let mut info = inferer.stack.new_struct(key);
+        }
 
         // type check all functions and structs...
         for function in program.functions.values_mut() {
-            checker.type_infer_function(function);
+            inferer.type_infer_function(function);
         }
     }
 
@@ -146,7 +155,7 @@ impl<'a> TypeInfer<'a> {
                     Some(ParsedType::Func{ret, ..}) => Some((**ret).clone()),
                     Some(ParsedType::Fresh{id}) => {
                         let ty_obj = self.stack.lookup_fresh(*id);
-                        let mut ty = ty_obj.borrow_mut();
+                        let ty = ty_obj.borrow_mut();
                         // TODO: Make this recursive to handle a -> b -> func
                         if let ParsedType::Func{ref ret, ..} = *ty {
                             Some((**ret).clone())
@@ -246,7 +255,7 @@ impl<'a> TypeInfer<'a> {
         self.stack.push(&block.scope);
         self.type_infer_expr(expr);
         self.type_infer_block(block);
-        self.stack.pop_scope();
+        self.stack.pop();
     }
 
     fn type_infer_statement(&mut self, statement: &mut Statement) {
@@ -269,7 +278,7 @@ impl<'a> TypeInfer<'a> {
                 if let Some(ref mut expr) = cond { self.type_infer_expr(expr); }
                 if let Some(ref mut expr) = end { self.type_infer_expr(expr); }
                 self.type_infer_block(block);
-                self.stack.pop_scope();
+                self.stack.pop();
             },
             Statement::Expr(ref mut inner) | Statement::Return(ref mut inner) => self.type_infer_expr(inner),
             Statement::Defer => {}
@@ -287,11 +296,7 @@ impl<'a> TypeInfer<'a> {
             }
         }
 
-        for expr in func.block.exprs.iter_mut() {
-            // type checking for return types are done later
-            self.type_infer_statement(expr);
-        }
-
-        self.stack.pop_scope();
+        self.type_infer_block(&mut func.block);
+        self.stack.pop();
     }
 }

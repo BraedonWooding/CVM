@@ -101,7 +101,7 @@ int foo(??? g) {
 }
 
 int main(void) {
-  // occurs check woudl fail
+  // occurs check would fail
   foo(foo);
 }
 ```
