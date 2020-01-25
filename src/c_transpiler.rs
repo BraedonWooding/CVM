@@ -274,10 +274,16 @@ impl Transpiler {
         match ty {
             ParsedType::Array{inner, ..} => {
                 self.transpile_type_lhs(&inner);
-                // no other logic
+                if let ParsedType::Var{..} = **inner {
+                    self.builder += " ";
+                }
             },
             ParsedType::Pointer(inner) => {
                 self.transpile_type_lhs(&inner);
+                if let ParsedType::Var{..} = **inner {
+                    self.builder += " ";
+                }
+
                 match **inner {
                     ParsedType::Var{..} | ParsedType::Pointer(..) | ParsedType::Fresh{..} | ParsedType::Func{..} => {
                         // simple type we just add a '*' afterwards
@@ -299,6 +305,9 @@ impl Transpiler {
             },
             ParsedType::Func{ret, ..} => {
                 self.transpile_type_lhs(&ret);
+                if let ParsedType::Var{..} = **ret {
+                    self.builder += " ";
+                }
                 self.builder += &format!("(*");
             },
             ParsedType::Fresh{id} => {
@@ -350,7 +359,7 @@ impl Transpiler {
                 if !args.is_empty() {
                     for (i, arg) in args.iter().enumerate() {
                         self.transpile_type(&arg);
-                        if i < args.len() - 1 { self.builder += ","; }
+                        if i < args.len() - 1 { self.builder += ", "; }
                     }
                 } else {
                     self.builder += "void";

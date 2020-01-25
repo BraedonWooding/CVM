@@ -43,8 +43,12 @@ impl<T> std::ops::Deref for Spanned<T> {
 
 #[derive(Clone, Default)]
 pub struct Span {
+    /// Represents the line range of this span
     pub line: (usize, usize),
-    pub col: (usize, usize)
+    /// Represents the col range of this span
+    pub col: (usize, usize),
+    /// Represents the byte offset range of this span
+    pub byte_offset: (usize, usize)
 }
 
 impl std::cmp::PartialEq for Span {

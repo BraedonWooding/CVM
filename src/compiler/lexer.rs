@@ -112,6 +112,7 @@ pub enum TokenKind {
 pub struct Lexer<'a> {
     pub line: usize,
     pub col: usize,
+    pub byte_offset: usize,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
 }
 
@@ -127,9 +128,11 @@ impl<'a, I> TokenIterator<'a> for std::iter::Peekable<I> where I: Iterator<Item 
 
 impl<'a> Lexer<'a> {
     pub fn new(chars: &'a str) -> Lexer<'a> {
+        // Lines / Cols start at 1
         Lexer {
-            line: 0,
-            col: 0,
+            line: 1,
+            col: 1,
+            byte_offset: 0,
             chars: chars.chars().peekable(),
         }
     }
@@ -139,9 +142,11 @@ impl<'a> Lexer<'a> {
             Some('\n') => {
                 self.line += 1;
                 self.col = 1;
+                self.byte_offset += 1;
             },
-            Some(_) => {
+            Some(c) => {
                 self.col += 1;
+                self.byte_offset += c.len_utf8();
             },
             None => {}
         }
@@ -351,14 +356,10 @@ impl<'a> Iterator for Lexer<'a> {
           but it'll just be less readable (I've experimented)
          */
 
-        // This is our 'we haven't read yet' indicator
-        if self.line == 0 {
-            self.line = 1;
-            self.col = 1;
-        }
-
         let start_line = self.line;
         let start_col = self.col;
+        // The byte_offset points to the start of the token
+        let start_byte_offset = self.byte_offset;
 
         // TODO: Maybe try to use a macro here??
         let kind = match self.next() {
@@ -516,7 +517,10 @@ impl<'a> Iterator for Lexer<'a> {
             Some(other) => return Some(Err(ErrorToken::new(other.to_string(), self.line, self.col))),
             None => return None
         };
-        Some(Ok(Token::new(kind, Span { line: (start_line, self.line), col: (start_col, self.col) })))
+        let line = (start_line, self.line);
+        let col = (start_col, self.col);
+        let byte_offset = (start_byte_offset, self.byte_offset);
+        Some(Ok(Token::new(kind, Span { line, col, byte_offset })))
     }
 }
 

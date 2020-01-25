@@ -55,16 +55,17 @@ macro_rules! test_type {
 fn type_tests() {
     test_type! {
         create_type!(Var "int") => "int",
-        create_type!(Pointer (Var "int")) => "int*",
-        create_type!(Pointer (Pointer (Var "int"))) => "int**",
-        create_type!(Array[constant!(Int 5)] (Pointer (Var "int"))) => "int*[5]",
+        create_type!(Pointer (Var "int")) => "int *",
+        create_type!(Pointer (Pointer (Var "int"))) => "int **",
+        create_type!(Array[constant!(Int 5)] (Pointer (Var "int"))) => "int *[5]",
         create_type!(Func (Var "int"), (Pointer (Var "double")),
                            (Array[constant!(Int 5)] (Pointer (Var "int")))
-                    -> Var "void") => "void(*)(int,double*,int*[5])",
+                    -> Var "void") => "void (*)(int, double *, int *[5])",
+        create_type!(Pointer (Array[constant!(Int 3)] (Var "int"))) => "int (*)[3]",
         // NOTE: this test and the above one may seem weird...
         //       because there is no function name but that is what they are meant to be
         //       for example in a cast you don't include the function name
         //       the only case you do is declarations!
-        create_type!(Func -> Pointer (Array[constant!(Int 3)] (Var "int"))) => "int(*(*)(void))[3]"
+        create_type!(Func -> Pointer (Array[constant!(Int 3)] (Var "int"))) => "int (*(*)(void))[3]"
     }
 }
