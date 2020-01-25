@@ -1,7 +1,10 @@
-use super::lexer::*;
-use super::ast::*;
 use crate::logger::*;
-use super::scope::*;
+use crate::compiler::*;
+
+use lexer::*;
+use ast::*;
+use scope::*;
+
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -17,15 +20,15 @@ pub struct Parser<'a> {
 macro_rules! expect {
     ($it:expr, $wanted:pat, $err:expr) => {
         match $it.peek() {
-            Some(Ok(Token { kind: $wanted, .. })) => {
+            Some(Ok(Token { inner: $wanted, .. })) => {
                 if let Some(Ok(ret_token)) = $it.next() {
                     Some(ret_token)
                 } else {
                     None
                 }
             },
-            Some(Ok(Token { kind, .. })) => {
-                log_expected_token($err, &kind);
+            Some(Ok(Token { inner, .. })) => {
+                log_expected_token($err, &inner);
                 None
             }
             Some(Err(other)) => panic!("Weird error {:?}", other),
@@ -52,7 +55,7 @@ macro_rules! parse_or_token {
 macro_rules! peek_expect {
     ($it:expr, $wanted:pat) => {
         match $it.peek() {
-            Some(Ok(Token { kind: $wanted, .. })) => true,
+            Some(Ok(Token { inner: $wanted, .. })) => true,
             Some(Err(other)) => panic!("Weird error {:?}", other),
             _ => false
         }
@@ -100,9 +103,9 @@ macro_rules! expect_match {
     ($it:expr, $capture:ident, { $($($key:pat)|* => $action:expr),+; _ => $else_action:expr } ) => {
         match $it.peek() {
             $(
-                $(Some(Ok(Token { kind: $key, .. })))|* => match $it.next() {
+                $(Some(Ok(Token { inner: $key, .. })))|* => match $it.next() {
                     #[allow(unused)]
-                    $(Some(Ok($capture @ Token { kind: $key, .. })))|* => $action,
+                    $(Some(Ok($capture @ Token { inner: $key, .. })))|* => $action,
                     // can't occur
                     _ => panic!("Unreachable"),
                 },
@@ -120,10 +123,10 @@ macro_rules! parse_binop {
             $($key)|+ => {
                 // a == b || c == 2
                 let rhs = $self.$lhs_parse()?;
-                let kind = match token_kind_to_binop(&tok.kind) {
+                let kind = match token_kind_to_binop(&tok) {
                     Some(op) => op,
                     None => {
-                        warn!("No binop matching {:?} this is probably internal error", tok.kind);
+                        warn!("No binop matching {:?} this is probably internal error", tok);
                         return None;
                     }
                 };
@@ -199,11 +202,12 @@ enum TopLevel {
 }
 
 impl<'a> Parser<'a> {
-    pub fn parse_program(stream: Lexer<'a>) -> (Option<Program>, ScopeStack) {
+    pub fn parse_program(stream: Lexer<'a>, filename: &str) -> (Option<Program>, ScopeStack) {
         let mut program = Program {
             top_scope: Rc::new(RefCell::new(Scope::default())),
             structs: HashMap::new(),
             functions: HashMap::new(),
+            filename: filename.to_string()
         };
         let mut parser = Parser::<'a> {
             it: stream.peekable(),
@@ -211,8 +215,8 @@ impl<'a> Parser<'a> {
         };
         while parser.it.peek().is_some() {
             match parser.parse_top_level() {
-                Some(TopLevel::StructDecl(decl)) => { program.structs.insert(decl.id.to_string(), decl); },
-                Some(TopLevel::FuncDecl(decl)) => { program.functions.insert(decl.name.to_string(), decl); },
+                Some(TopLevel::StructDecl(decl)) => { program.structs.insert(decl.id.clone(), decl); },
+                Some(TopLevel::FuncDecl(decl)) => { program.functions.insert(decl.name.clone(), decl); },
                 None => return (None, parser.stack)
             }
         }
@@ -307,7 +311,7 @@ impl<'a> Parser<'a> {
                 // we have to write an the variable here
                 // because else the value can't refer to itself
                 // which blocks recursive lambdas
-                ty = self.stack.cur().borrow_mut().new_var(name.to_string(), Some(ty))
+                ty = self.stack.cur().borrow_mut().new_var(name.clone(), Some(ty))
                                                   .expect("Multiple variables with the same name {{TODO}} better msg");
                
                 let rhs = if try_expect!(self.it, TokenKind::Assign).is_some() {
@@ -315,7 +319,7 @@ impl<'a> Parser<'a> {
                 } else if has_type {
                     None
                 } else {
-                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int for name {}", name);
+                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int for name {:?}", name);
                     return None;
                 };
 
@@ -329,7 +333,7 @@ impl<'a> Parser<'a> {
                 // assignment i.e. +=
                 let kind = match self.it.peek() {
                     Some(Ok(tok)) if tok.is_assignment() => {
-                        match token_kind_to_assignment(&self.it.next()?.unwrap().kind) {
+                        match token_kind_to_assignment(&self.it.next()?.unwrap()) {
                             Some(tok) => tok,
                             None => {
                                 warn!("Invalid assignment token... this is an internal error");
@@ -395,12 +399,12 @@ impl<'a> Parser<'a> {
         if create_scope {
             self.stack.pop();
         }
-        Some(Block { scope: scope, exprs: list })
+        Some(Block { scope: scope, statements: list })
     }
 
     fn parse_id(&mut self) -> Option<Ident> {
         if let Some(tok) = try_expect!(self.it, TokenKind::Ident(_)) {
-            Some(tok.kind.into_ident().unwrap())
+            Some(tok.transform(|x| x.into_ident().unwrap()))
         } else {
             None
         }
@@ -426,7 +430,7 @@ impl<'a> Parser<'a> {
                 } else {
                     vec![]
                 };
-                ParsedType::Var{id: tok.kind.into_ident().unwrap(), gen_args}
+                ParsedType::Var{id: tok.transform(|x| x.into_ident().unwrap()), gen_args}
             },
             TokenKind::Function => {
                 let gen_args = if try_expect!(self.it, TokenKind::LAngle).is_some() {
@@ -525,7 +529,7 @@ impl<'a> Parser<'a> {
             match self.it.peek() {
                 Some(Ok(c)) if c.is_unary() => {
                     // TODO: This will probably be a bit prone to bugs...
-                    unary_ops.push(token_kind_to_unary(&self.it.next()?.unwrap().kind)?);
+                    unary_ops.push(token_kind_to_unary(&self.it.next()?.unwrap())?);
                 }
                 _ => break
             }
@@ -568,7 +572,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_atom(&mut self) -> Option<Expr> {
-        info!("Should be here... {:?}", self.it.peek());
         let lhs = expect_match!(self.it, tok, {
             TokenKind::LParen => {
                 let inner = Box::new(self.parse_conditional()?);
@@ -576,7 +579,7 @@ impl<'a> Parser<'a> {
                 Expr { type_annot: None, kind: ExprKind::Paren(inner) }
             },
             TokenKind::Ident(_) => {
-                let id = tok.kind.into_ident().unwrap();
+                let id = tok.transform(|x| x.into_ident().unwrap());
                 Expr { type_annot: None, kind: ExprKind::Var(id) }
             },
             TokenKind::Sizeof => {
@@ -641,7 +644,8 @@ impl<'a> Parser<'a> {
                 Expr { type_annot: None, kind: ExprKind::Cast{ to, from, obj } }
             },
             TokenKind::Number(..) => {
-                let (num, postfix) = tok.kind.into_number().unwrap();
+                let Spanned { inner: (num, postfix), span }
+                    = tok.transform(|x| x.into_number().unwrap());
                 // currently only supports int32 and flt32
                 Expr { type_annot: None,
                     kind: ExprKind::Constant(match postfix {
@@ -654,23 +658,23 @@ impl<'a> Parser<'a> {
                 }
             },
             TokenKind::Bool(..) => {
-                let value = tok.kind.into_bool().unwrap();
+                let value = tok.transform(|x| x.into_bool().unwrap());
                 Expr { type_annot: None,
-                       kind: ExprKind::Constant(ConstantKind::Bool(value)) }
+                       kind: ExprKind::Constant(ConstantKind::Bool(*value)) }
             },
             TokenKind::Str(..) => {
-                let value = tok.kind.into_str().unwrap();
+                let value = tok.transform(|x| x.into_str().unwrap());
                 Expr { type_annot: None,
-                       kind: ExprKind::Constant(ConstantKind::Str(value)) }
+                       kind: ExprKind::Constant(ConstantKind::Str(value.to_string())) }
             },
             TokenKind::Null => {
                 Expr { type_annot: None,
                     kind: ExprKind::Constant(ConstantKind::Null) }
             },
             TokenKind::Character(..) => {
-                let value = tok.kind.into_character().unwrap();
+                let value = tok.transform(|x| x.into_character().unwrap());
                 Expr { type_annot: None,
-                    kind: ExprKind::Constant(ConstantKind::Char(value)) }
+                    kind: ExprKind::Constant(ConstantKind::Char(*value)) }
             },
             TokenKind::Uninitialised => {
                 Expr { type_annot: None, kind: ExprKind::Uninitialiser }
@@ -699,7 +703,7 @@ impl<'a> Parser<'a> {
                     // member access or function call
                     expect_match!(self.it, tok, {
                         TokenKind::Ident(..) => {
-                            ExprKind::Member(Box::new(tmp), tok.kind.into_ident().unwrap())
+                            ExprKind::Member(Box::new(tmp), tok.transform(|x| x.into_ident().unwrap()))
                         },
                         TokenKind::LAngle => {
                             let id = match tmp.kind {
@@ -765,7 +769,7 @@ impl<'a> Parser<'a> {
 
     fn parse_struct(&mut self) -> Option<Struct> {
         let id = match expect!(self.it, TokenKind::Ident(_), "identifier") {
-            Some(Token{kind: TokenKind::Ident(id), ..}) => id,
+            Some(id) => id.transform(|x| x.into_ident().unwrap()),
             Some(_) | None => return None,
         };
 
@@ -831,13 +835,13 @@ impl<'a> Parser<'a> {
 
         for arg in args.iter_mut() {
             self.stack.cur().borrow_mut()
-                .new_var(arg.name.to_string(), arg.decl_type.clone())
+                .new_var(arg.name.clone(), arg.decl_type.clone())
                 .expect("Variable already exists with variable name {TODO}");
         }
         
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
             let cond = self.parse_conditional()?;
-            Block { exprs: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
+            Block { statements: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
         } else {
             self.parse_block(false)?
         };
@@ -868,7 +872,7 @@ impl<'a> Parser<'a> {
             warn!("Internal error new_fresh_type returned a non fresh type");
             return None
         };
-        self.stack.top().borrow_mut().new_var(name.to_string(), Some(fresh));
+        self.stack.top().borrow_mut().new_var(name.clone(), Some(fresh));
 
         // push a new scope
         self.stack.push_new();
@@ -892,13 +896,13 @@ impl<'a> Parser<'a> {
         let mut arg_types = vec![];
         for arg in args.iter_mut() {
             arg_types.push(self.stack.cur().borrow_mut()
-                .new_var(arg.name.to_string(), arg.decl_type.clone())
+                .new_var(arg.name.clone(), arg.decl_type.clone())
                 .expect("Variable already exists with variable name {TODO}"));
         }
 
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
             let cond = self.parse_conditional()?;
-            Block { exprs: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
+            Block { statements: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
         } else {
             self.parse_block(false)?
         };

@@ -43,7 +43,7 @@ impl<'a> TypeCheck<'a> {
     }
 
     fn type_check_block(&mut self, block: &mut Block) {
-        for mut statement in block.exprs.iter_mut() {
+        for mut statement in block.statements.iter_mut() {
             self.type_check_statement(&mut statement);
         }
         // defers get type checked after the block
@@ -94,6 +94,11 @@ impl<'a> TypeCheck<'a> {
                         self.unify(inner, &ParsedType::new_simple_var_type("bool"));
                     }
                 }
+
+                if let Some(ref mut expr) = step {
+                    self.type_check_expr(expr);
+                }
+
                 self.type_check_block(block);
 
                 self.stack.pop();
@@ -150,23 +155,23 @@ impl<'a> TypeCheck<'a> {
             // TODO: Care about generic args
             (ParsedType::Var{id: ref a_id, ..}, ParsedType::Var{id: ref b_id, ..}) => {
                 // @TYPEDEF: TODO: When typedefs come around be smarter here
-                if (*a_id == *b_id) {
+                if *a_id == *b_id {
                     // Do nothing no unification
                 } else {
                     // TODO: Coercian for example int => bool
                     // Type error!
-                    warn!("Type Error: Can't unify {} and {}", a_id, b_id);
+                    warn!("Type Error: Can't unify {:?} and {:?}", a_id, b_id);
                 }
             },
             (ParsedType::Fresh{id: ref a_id}, ParsedType::Fresh{id: ref b_id}) => {
-                if (*a_id != *b_id) {
+                if *a_id != *b_id {
                     self.set_type(*a_id, ParsedType::Fresh{id: *b_id});
                 } else {
                     // already unified
                 }
             },
             (ParsedType::Fresh{ref id}, ref other) | (ref other, ParsedType::Fresh{ref id}) => {
-                if (self.occurs(*id, other)) {
+                if self.occurs(*id, other) {
                     // error
                     warn!("Occurs check failed, infinite type in {}", id);
                 } else {

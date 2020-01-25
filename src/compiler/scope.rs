@@ -1,4 +1,7 @@
-use crate::compiler::ast::*;
+use crate::compiler::*;
+
+use ast::*;
+
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -56,7 +59,7 @@ impl ScopeStack {
 
     pub fn new_struct(&mut self, id: &Ident) -> &mut StructInfo {
         if !self.has_struct(id) {
-            self.stack_info.insert(id.to_string(), StructInfo::default());
+            self.stack_info.insert(id.clone(), StructInfo::default());
         }
         self.stack_info.get_mut(id).unwrap()
     }

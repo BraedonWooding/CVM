@@ -15,7 +15,7 @@ impl<'a> TypeInfer<'a> {
 
         for (key, value) in program.structs.iter_mut() {
             if inferer.stack.has_struct(&key) {
-                warn!("Struct already defined!  {}", key);
+                warn!("Struct already defined! {:?}", key);
                 continue;
             }
 
@@ -60,7 +60,7 @@ impl<'a> TypeInfer<'a> {
         let mut res = ty;
         for kind in kinds {
             res = match kind {
-                UnaryKind::BitNot | UnaryKind::Neg | UnaryKind::Pos | UnaryKind::Neg | UnaryKind::Not => res,
+                UnaryKind::BitNot | UnaryKind::Neg | UnaryKind::Pos | UnaryKind::Not => res,
                 UnaryKind::Address => ParsedType::Pointer(Box::new(res)),
                 UnaryKind::Deref => match self.deref_type(res) {
                     Some(new_ty) => new_ty,
@@ -126,7 +126,7 @@ impl<'a> TypeInfer<'a> {
                 match self.stack.cur().borrow_mut().lookup_var_cond(&id) {
                     Some(ty) => Some(ty.borrow().clone()),
                     None => {
-                        warn!("Error: No variable found with name {}", id);
+                        warn!("Error: No variable found with name {:?}", id);
                         None
                     }
                 }
@@ -195,7 +195,7 @@ impl<'a> TypeInfer<'a> {
                     _ => {}
                 }
                 // sizeof always returns size_t
-                Some(ParsedType::Var{id: "size_t".to_string(), gen_args: vec![]})
+                Some(ParsedType::new_simple_var_type("size_t"))
             },
             ExprKind::Binop(ref mut lhs, op, ref mut rhs) => {
                 // We'll check they are the same type in the type check phase...
@@ -214,7 +214,7 @@ impl<'a> TypeInfer<'a> {
                     BinopKind::NotEqual | BinopKind::LessThan | BinopKind::GreaterThan |
                     BinopKind::LessEqual | BinopKind::GreaterEqual => {
                         // will always produce a boolean
-                        Some(ParsedType::Var{id: "bool".to_string(), gen_args: vec![]})
+                        Some(ParsedType::new_simple_var_type("bool"))
                     }
                 }
             },
@@ -223,12 +223,12 @@ impl<'a> TypeInfer<'a> {
                 None
             },
             ExprKind::Constant(kind) => match kind {
-                ConstantKind::Int32(..) => Some(ParsedType::Var{id: "int32_t".to_string(), gen_args: vec![]}),
-                ConstantKind::Flt64(..) => Some(ParsedType::Var{id: "double".to_string(), gen_args: vec![]}),
-                ConstantKind::Str(..) => Some(ParsedType::Pointer(Box::new(ParsedType::Var{id: "char".to_string(), gen_args: vec![]}))),
-                ConstantKind::Char(..) => Some(ParsedType::Var{id: "char".to_string(), gen_args: vec![]}),
+                ConstantKind::Int32(..) => Some(ParsedType::new_simple_var_type("int32_t")),
+                ConstantKind::Flt64(..) => Some(ParsedType::new_simple_var_type("double")),
+                ConstantKind::Str(..) => Some(ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char")))),
+                ConstantKind::Char(..) => Some(ParsedType::new_simple_var_type("char")),
                 ConstantKind::Null => Some(ParsedType::Pointer(Box::new(ScopeStack::new_fresh_type()))),
-                ConstantKind::Bool(..) => Some(ParsedType::Var{id: "bool".to_string(), gen_args: vec![]}),
+                ConstantKind::Bool(..) => Some(ParsedType::new_simple_var_type("bool")),
             },
             ExprKind::Let(ref mut inner) => {
                 self.type_infer_expr(inner);
@@ -246,7 +246,7 @@ impl<'a> TypeInfer<'a> {
     }
 
     fn type_infer_block(&mut self, block: &mut Block) {
-        for expr in block.exprs.iter_mut() {
+        for expr in block.statements.iter_mut() {
             self.type_infer_statement(expr);
         }
     }

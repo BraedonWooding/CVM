@@ -60,7 +60,7 @@ fn main() -> std::io::Result<()> {
             // most steps require the previous ones to exist
             // so we always generate each step... it is just more that
             // we print out the itermediaries at each point
-            let (mut ast, mut stack) = match Parser::parse_program(lexer) {
+            let (mut ast, mut stack) = match Parser::parse_program(lexer, filename) {
                 (Some(ast), stack) => (ast, stack),
                 (None, ..) => return Ok(()),
             };

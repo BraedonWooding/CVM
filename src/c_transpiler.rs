@@ -1,4 +1,5 @@
-use crate::compiler::ast::*;
+use crate::compiler::*;
+use ast::*;
 
 extern crate log;
 use log::{info, trace, warn};
@@ -92,7 +93,7 @@ impl Transpiler {
 
     fn transpile_func_decl(&mut self, decl: &Function) {
         self.transpile_type(&decl.ret);
-        self.builder += &format!(" {}(", decl.name);
+        self.builder += &format!(" {}(", *decl.name);
         // write arguments
         for (i, arg) in decl.args.iter().enumerate() {
             self.transpile_decl(&arg);
@@ -189,7 +190,7 @@ impl Transpiler {
             ExprKind::Var(id) => self.builder += &id,
             ExprKind::Member(expr, ident) => {
                 self.transpile_expr(&expr);
-                self.builder += &format!(".{}", ident);
+                self.builder += &format!(".{}", **ident);
             },
             ExprKind::GenFuncCall(..) => {
                 // TODO
@@ -369,7 +370,7 @@ impl Transpiler {
                 self.builder += " ";
             },
             None => {
-                warn!("decl type for decl with id {} is none... replacing type with ???", decl.name);
+                warn!("decl type for decl with id {:?} is none... replacing type with ???", decl.name);
                 self.builder += "??? ";
             }
         }
@@ -383,8 +384,7 @@ impl Transpiler {
     }
 
     fn transpile_struct_decl(&mut self, decl: &Struct) {
-        self.builder += &format!("typedef struct {0} {0};\nstruct {0}",
-                                decl.id);
+        self.builder += &format!("typedef struct {0} {0};\nstruct {0}", *decl.id);
         self.begin_scope(" {\n");
         // generic args not yet supported... TODO
         if decl.gen_args.len() > 0 {
@@ -402,7 +402,7 @@ impl Transpiler {
 
     fn transpile_block(&mut self, block: &Block) {
         self.begin_scope("{\n");
-        for statement in block.exprs.as_slice() {
+        for statement in block.statements.as_slice() {
             self.write_indent();
             self.transpile_statement(statement);
             self.builder += "\n";

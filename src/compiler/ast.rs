@@ -7,13 +7,12 @@
    to ensure the expressions are valid we get less safety
  */
 
-use crate::compiler::scope::Scope;
+use crate::compiler::*;
+use scope::Scope;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-pub type Ident = String;
-pub type IdentList = Vec<Ident>;
 pub type DeclList = Vec<Decl>;
 
 #[derive(Debug, Clone)]
@@ -21,12 +20,13 @@ pub struct Program {
     pub functions: HashMap<Ident, Function>,
     pub structs: HashMap<Ident, Struct>,
     pub top_scope: Rc<RefCell<Scope>>,
+    pub filename: String
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Block {
     pub scope: Rc<RefCell<Scope>>,
-    pub exprs: Vec<Statement>
+    pub statements: Vec<Statement>
 }
 
 #[derive(Debug, Clone)]
@@ -158,7 +158,7 @@ pub enum ParsedType {
 
 impl ParsedType {
     pub fn new_simple_var_type(id: &str) -> ParsedType {
-        ParsedType::Var{id: id.to_string(), gen_args: vec![]}
+        ParsedType::Var{id: Ident::new(id.to_string(), Span::default()), gen_args: vec![]}
     }
 }
 

@@ -1,5 +1,7 @@
 extern crate log;
-use log::{info, trace, warn};
+use log::{warn};
+
+use crate::compiler::*;
 
 // It makes the prefixes nicer to use
 #[allow(non_camel_case_types)]
@@ -26,12 +28,7 @@ pub struct ErrorToken {
     col: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct Token {
-    pub start: (usize, usize),
-    pub end: (usize, usize),
-    pub kind: TokenKind,
-}
+pub type Token = Spanned<TokenKind>;
 
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum TokenKind {
@@ -299,7 +296,7 @@ impl<'a> Lexer<'a> {
 
 impl Token {
     pub fn is_assignment(&self) -> bool {
-        match self.kind {
+        match **self {
             TokenKind::Assign => true,
             TokenKind::AddAssign => true,
             TokenKind::SubAssign => true,
@@ -316,7 +313,7 @@ impl Token {
     }
 
     pub fn is_unary(&self) -> bool {
-        match self.kind {
+        match **self {
             TokenKind::BitNot => true,
             TokenKind::Not => true,
             TokenKind::Asterix => true,
@@ -360,7 +357,8 @@ impl<'a> Iterator for Lexer<'a> {
             self.col = 1;
         }
 
-        let start = (self.line, self.col);
+        let start_line = self.line;
+        let start_col = self.col;
 
         // TODO: Maybe try to use a macro here??
         let kind = match self.next() {
@@ -518,7 +516,7 @@ impl<'a> Iterator for Lexer<'a> {
             Some(other) => return Some(Err(ErrorToken::new(other.to_string(), self.line, self.col))),
             None => return None
         };
-        Some(Ok(Token{ start: start, end: (self.line, self.col), kind }))
+        Some(Ok(Token::new(kind, Span { line: (start_line, self.line), col: (start_col, self.col) })))
     }
 }
 

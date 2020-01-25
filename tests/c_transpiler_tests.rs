@@ -3,7 +3,7 @@ use cvm_lib::*;
 
 macro_rules! create_type {
     (Var $id:tt) => {
-        ParsedType::Var { id: $id.to_string(), gen_args: vec![] }
+        ParsedType::new_simple_var_type($id)
     };
     (Pointer ($($inner:tt)+)) => {
         ParsedType::Pointer(Box::new(create_type!($($inner) +)))
@@ -19,7 +19,7 @@ macro_rules! create_type {
     };
 }
 
-macro_rules! create_constant {
+macro_rules! constant {
     (Int $n:expr) => {
         Expr { kind: ExprKind::Constant(ConstantKind::Int32($n)), type_annot: Some(create_type!(Var "int")) }
     };
@@ -57,14 +57,14 @@ fn type_tests() {
         create_type!(Var "int") => "int",
         create_type!(Pointer (Var "int")) => "int*",
         create_type!(Pointer (Pointer (Var "int"))) => "int**",
-        create_type!(Array[create_constant!(Int 5)] (Pointer (Var "int"))) => "int*[5]",
+        create_type!(Array[constant!(Int 5)] (Pointer (Var "int"))) => "int*[5]",
         create_type!(Func (Var "int"), (Pointer (Var "double")),
-                           (Array[create_constant!(Int 5)] (Pointer (Var "int")))
+                           (Array[constant!(Int 5)] (Pointer (Var "int")))
                     -> Var "void") => "void(*)(int,double*,int*[5])",
         // NOTE: this test and the above one may seem weird...
         //       because there is no function name but that is what they are meant to be
         //       for example in a cast you don't include the function name
         //       the only case you do is declarations!
-        create_type!(Func -> Pointer (Array[create_constant!(Int 3)] (Var "int"))) => "int(*(*)(void))[3]"
+        create_type!(Func -> Pointer (Array[constant!(Int 3)] (Var "int"))) => "int(*(*)(void))[3]"
     }
 }
