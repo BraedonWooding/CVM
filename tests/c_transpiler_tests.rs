@@ -45,7 +45,7 @@ macro_rules! test_type {
         $({
             let ty = $type;
             let mut transpiler = Transpiler::new(false);
-            transpiler.transpile_type(&ty);
+            transpiler.transpile_type(&ty, TypeOpts::empty());
             assert_eq!(transpiler.get_output(), $val);
         });+
     };
@@ -57,6 +57,7 @@ fn type_tests() {
         create_type!(Var "int") => "int",
         create_type!(Pointer (Var "int")) => "int *",
         create_type!(Pointer (Pointer (Var "int"))) => "int **",
+        create_type!(Array[constant!(Int 5)] (Var "int")) => "int [5]",
         create_type!(Array[constant!(Int 5)] (Pointer (Var "int"))) => "int *[5]",
         create_type!(Func (Var "int"), (Pointer (Var "double")),
                            (Array[constant!(Int 5)] (Pointer (Var "int")))
@@ -66,6 +67,8 @@ fn type_tests() {
         //       because there is no function name but that is what they are meant to be
         //       for example in a cast you don't include the function name
         //       the only case you do is declarations!
-        create_type!(Func -> Pointer (Array[constant!(Int 3)] (Var "int"))) => "int (*(*)(void))[3]"
+        // Also the array disappears because it's a function return type
+        // and you can't return arrays in C
+        create_type!(Func -> Pointer (Array[constant!(Int 3)] (Var "int"))) => "int **(*)(void)"
     }
 }

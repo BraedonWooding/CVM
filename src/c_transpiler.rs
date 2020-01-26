@@ -2,17 +2,33 @@ use crate::compiler::*;
 use ast::*;
 
 extern crate log;
-use log::{info, trace, warn};
+use log::{warn};
+
+use std::collections::hash_map::HashMap;
 
 pub struct Transpiler {
     depth: usize,
     builder: String,
-    alpha_types: bool
+    alpha_types: bool,
+    fresh_type_lookup: HashMap<usize, String>,
+}
+
+bitflags! {
+    /// Options for transpiling a type
+    pub struct TypeOpts: u8 {
+        /// We are transpiling a function return
+        /// So convert arrays to pointers
+        const FUNCTION_RETURN = 0x1;
+        /// We are parsing a non simple type parent
+        /// So add spaces to simple var types
+        const SIMPLE_VAR_SPACE = 0x2;
+    }
 }
 
 impl Transpiler {
     pub fn new(alpha_types: bool) -> Transpiler {
-        Transpiler { depth: 0, builder: String::from(""), alpha_types }
+        Transpiler { depth: 0, builder: String::from(""), alpha_types,
+                     fresh_type_lookup: HashMap::default() }
     }
 
     pub fn get_output<'a>(&'a self) -> &'a str {
@@ -92,8 +108,9 @@ impl Transpiler {
     }
 
     fn transpile_func_decl(&mut self, decl: &Function) {
-        self.transpile_type(&decl.ret);
-        self.builder += &format!(" {}(", *decl.name);
+        let opts = TypeOpts::FUNCTION_RETURN | TypeOpts::SIMPLE_VAR_SPACE;
+        self.transpile_type(&decl.ret, opts);
+        self.builder += &format!("{}(", *decl.name);
         // write arguments
         for (i, arg) in decl.args.iter().enumerate() {
             self.transpile_decl(&arg);
@@ -209,7 +226,7 @@ impl Transpiler {
                 // we are going to write it as (to)(obj)
                 // this will just make sure no nasty precedence exists
                 self.builder += "(";
-                self.transpile_type(to);
+                self.transpile_type(to, TypeOpts::empty());
                 self.builder += ")(";
                 self.transpile_expr(&obj);
                 self.builder += ")";
@@ -223,7 +240,7 @@ impl Transpiler {
             ExprKind::Sizeof(ty, ..) => {
                 // always choose the type
                 self.builder += "sizeof(";
-                self.transpile_type(&ty);
+                self.transpile_type(&ty, TypeOpts::empty());
                 self.builder += ")";
             },
             ExprKind::Binop(lhs, op, rhs) => {
@@ -254,7 +271,7 @@ impl Transpiler {
                 // since in C you can use assignments as conditionals
                 self.transpile_expr(&expr);
             },
-            ExprKind::Lambda(lambda) => {
+            ExprKind::Lambda(_lambda) => {
                 // this will need to be declared else where...
                 // TODO
                 self.builder += "???";
@@ -270,29 +287,23 @@ impl Transpiler {
     // just write the lhs of the type
     // i.e. for C type => int (*a3)[8]
     // it'll just write the int (*
-    fn transpile_type_lhs(&mut self, ty: &ParsedType) {
+    fn transpile_type_lhs(&mut self, ty: &ParsedType, opts: TypeOpts) {
+        let is_func_ret = opts.contains(TypeOpts::FUNCTION_RETURN);
         match ty {
-            ParsedType::Array{inner, ..} => {
-                self.transpile_type_lhs(&inner);
-                if let ParsedType::Var{..} = **inner {
-                    self.builder += " ";
-                }
+            ParsedType::Array{inner, ..} if !is_func_ret => {
+                self.transpile_type_lhs(&inner, opts | TypeOpts::SIMPLE_VAR_SPACE);
             },
-            ParsedType::Pointer(inner) => {
-                self.transpile_type_lhs(&inner);
-                if let ParsedType::Var{..} = **inner {
-                    self.builder += " ";
-                }
+            ParsedType::Pointer(inner) | ParsedType::Array{inner, ..} => {
+                self.transpile_type_lhs(&inner, opts | TypeOpts::SIMPLE_VAR_SPACE);
 
                 match **inner {
-                    ParsedType::Var{..} | ParsedType::Pointer(..) | ParsedType::Fresh{..} | ParsedType::Func{..} => {
-                        // simple type we just add a '*' afterwards
-                        self.builder += "*";
+                    ParsedType::Array{..} if !is_func_ret => {
+                        // array type so we need to wrap the type in a '('
+                        self.builder += "(*";
                     },
                     _ => {
-                        // else we have a complex type (array)
-                        // so we need to wrap the type in a '('
-                        self.builder += "(*"
+                        // non array type we just add a '*' afterwards
+                        self.builder += "*";
                     }
                 }
             },
@@ -302,70 +313,88 @@ impl Transpiler {
                     warn!("Generic args on structs aren't supported for C transpilation yet...");
                 }
                 self.builder += &id;
-            },
-            ParsedType::Func{ret, ..} => {
-                self.transpile_type_lhs(&ret);
-                if let ParsedType::Var{..} = **ret {
+                if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
                     self.builder += " ";
                 }
+            },
+            ParsedType::Func{ret, ..} => {
+                let opts = opts | TypeOpts::SIMPLE_VAR_SPACE | TypeOpts::FUNCTION_RETURN;
+                self.transpile_type_lhs(&ret, opts);
                 self.builder += &format!("(*");
             },
             ParsedType::Fresh{id} => {
-                if self.alpha_types {
-                    // generate type name as $a $b $c
-                    // and so on...
-                    let mut text = String::new();
-                    let mut num = *id;
-                    loop {
-                        let c = std::char::from_u32((num % 26) as u32 + b'a' as u32).unwrap();
-                        num /= 26;
-                        text.insert(0, c);
-                        if num == 0 { break; }
-                        num -= 1;
-                    }
-                    self.builder += &text;
-                } else {
-                    self.builder += "$_";
-                    self.builder += &id.to_string();
+                let use_alpha = self.alpha_types;
+                let count = self.fresh_type_lookup.len();
+                let cpy = self.fresh_type_lookup.entry(*id)
+                    .or_insert_with(|| Self::generate_fresh(use_alpha, count));
+                self.builder.push_str(cpy);
+
+                if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
+                    self.builder += " ";
                 }
             }
         }
     }
 
-    pub fn transpile_type(&mut self, ty: &ParsedType) {
-        self.transpile_type_lhs(&ty);
-        self.transpile_type_rhs(&ty);
+    fn generate_fresh(alpha_types: bool, id: usize) -> String {
+        if alpha_types {
+            // generate type name as a, b, c, ..., aa, ..., abc
+            // and so on...
+            let mut text = String::new();
+            let mut num = id;
+            loop {
+                let c = std::char::from_u32((num % 26) as u32 + b'a' as u32).unwrap();
+                num /= 26;
+                text.insert(0, c);
+                if num == 0 { break; }
+                num -= 1;
+            }
+            text
+        } else {
+            // most compilers support '$' as an identifier token
+            // but this isn't why it is used here, it's used here
+            // to distinguish itself from other identifiers to avoid
+            // name collision
+            format!("$_{}", id)
+        }
+    }
+
+    /// Transpile a type with given opts
+    pub fn transpile_type(&mut self, ty: &ParsedType, opts: TypeOpts) {
+        self.transpile_type_lhs(&ty, opts);
+        self.transpile_type_rhs(&ty, opts);
     }
 
     // NOTE: we do inner after ourselves in rhs
-    fn transpile_type_rhs(&mut self, ty: &ParsedType) {
+    fn transpile_type_rhs(&mut self, ty: &ParsedType, opts: TypeOpts) {
+        let is_func_ret = opts.contains(TypeOpts::FUNCTION_RETURN);
         match ty {
-            ParsedType::Array{inner, len} => {
+            ParsedType::Array{inner, len} if !is_func_ret => {
                 self.builder += "[";
                 self.transpile_expr(len);
                 self.builder += "]";
-                self.transpile_type_rhs(&inner);
+                self.transpile_type_rhs(&inner, opts);
                 // just chuck the []
             },
-            ParsedType::Pointer(inner) => {
+            ParsedType::Pointer(inner) | ParsedType::Array{inner, ..} => {
                 if let ParsedType::Array{..} = **inner {
-                    self.builder += ")";
+                    if !is_func_ret { self.builder += ")"; }
                 }
-                self.transpile_type_rhs(&inner);
+                self.transpile_type_rhs(&inner, opts);
             },
             ParsedType::Var{..} => { /* no op */ },
             ParsedType::Func{args, ret, ..} => {
                 self.builder += ")(";
                 if !args.is_empty() {
                     for (i, arg) in args.iter().enumerate() {
-                        self.transpile_type(&arg);
+                        self.transpile_type(&arg, opts & !TypeOpts::SIMPLE_VAR_SPACE);
                         if i < args.len() - 1 { self.builder += ", "; }
                     }
                 } else {
                     self.builder += "void";
                 }
                 self.builder += ")";
-                self.transpile_type_rhs(&ret);
+                self.transpile_type_rhs(&ret, opts | TypeOpts::FUNCTION_RETURN);
             },
             ParsedType::Fresh{..} => { }
         }
@@ -373,10 +402,10 @@ impl Transpiler {
 
     fn transpile_decl(&mut self, decl: &Decl) {
         // write it as decl_type id val
+        let opts = TypeOpts::SIMPLE_VAR_SPACE;
         match &decl.decl_type {
             Some(ty) => {
-                self.transpile_type_lhs(&ty);
-                self.builder += " ";
+                self.transpile_type_lhs(&ty, opts);
             },
             None => {
                 warn!("decl type for decl with id {:?} is none... replacing type with ???", decl.name);
@@ -385,8 +414,8 @@ impl Transpiler {
         }
 
         self.builder += &decl.name;
-        if decl.decl_type.is_some() {
-            self.transpile_type_rhs(&decl.decl_type.as_ref().unwrap());
+        if let Some(ty) = &decl.decl_type {
+            self.transpile_type_rhs(&ty, opts);
         }
         // values are ignored... since they are just inserted
         // at the construction site!

@@ -1,9 +1,8 @@
 use crate::compiler::scope::*;
 use crate::compiler::ast::*;
-use std::rc::Rc;
 
 extern crate log;
-use log::{info, warn};
+use log::{warn};
 
 pub struct TypeInfer<'a> {
     stack: &'a mut ScopeStack,
