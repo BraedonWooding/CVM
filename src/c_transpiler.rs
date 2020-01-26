@@ -110,7 +110,7 @@ impl Transpiler {
     fn transpile_func_decl(&mut self, decl: &Function) {
         let opts = TypeOpts::FUNCTION_RETURN | TypeOpts::SIMPLE_VAR_SPACE;
         self.transpile_type(&decl.ret, opts);
-        self.builder += &format!("{}(", *decl.name);
+        self.builder += &format!("{}(", *decl.id);
         // write arguments
         for (i, arg) in decl.args.iter().enumerate() {
             self.transpile_decl(&arg);
@@ -402,21 +402,9 @@ impl Transpiler {
 
     fn transpile_decl(&mut self, decl: &Decl) {
         // write it as decl_type id val
-        let opts = TypeOpts::SIMPLE_VAR_SPACE;
-        match &decl.decl_type {
-            Some(ty) => {
-                self.transpile_type_lhs(&ty, opts);
-            },
-            None => {
-                warn!("decl type for decl with id {:?} is none... replacing type with ???", decl.name);
-                self.builder += "??? ";
-            }
-        }
-
-        self.builder += &decl.name;
-        if let Some(ty) = &decl.decl_type {
-            self.transpile_type_rhs(&ty, opts);
-        }
+        self.transpile_type_lhs(&decl.decl_type, TypeOpts::SIMPLE_VAR_SPACE);
+        self.builder += &decl.id;
+        self.transpile_type_rhs(&decl.decl_type, TypeOpts::SIMPLE_VAR_SPACE);
         // values are ignored... since they are just inserted
         // at the construction site!
     }

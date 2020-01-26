@@ -12,13 +12,10 @@ impl<'a> TypeInfer<'a> {
     pub fn type_infer_program(program: &mut Program, stack: &'a mut ScopeStack) {
         let mut inferer = TypeInfer { stack };
 
-        for (key, value) in program.structs.iter_mut() {
-            if inferer.stack.has_struct(&key) {
-                warn!("Struct already defined! {:?}", key);
-                continue;
+        for value in program.structs.values_mut() {
+            for decl in value.decls.iter_mut() {
+                inferer.type_infer_decl(decl);
             }
-
-            let mut info = inferer.stack.new_struct(key);
         }
 
         // type check all functions and structs...
@@ -70,6 +67,27 @@ impl<'a> TypeInfer<'a> {
         Some(res)
     }
 
+    fn type_infer_decl(&mut self, decl: &mut Decl) -> Option<ParsedType> {
+        match decl.val {
+            Some(ref mut expr) => {
+                self.type_infer_expr(expr);
+                if let ParsedType::Fresh{..} = decl.decl_type {
+                    if let Some(ty) = &expr.type_annot {
+                        decl.decl_type = ty.clone();
+                    } else {
+                        return None;
+                    }
+                }
+            },
+            None =>
+                if let ParsedType::Var{..} = decl.decl_type {
+                    warn!("Internal error decl {:?} has missing type/value", decl);
+                    return None;
+                },
+        }
+        return Some(decl.decl_type.clone())
+    }
+
     fn type_infer_expr(&mut self, expr: &mut Expr) {
         expr.type_annot = match &mut expr.kind {
             ExprKind::Assign{ref mut lhs, ref mut rhs, ..} => {
@@ -78,29 +96,7 @@ impl<'a> TypeInfer<'a> {
                 lhs.type_annot.clone()
             },
             ExprKind::Decl(ref mut decl) => {
-                match decl.val {
-                    Some(ref mut expr) => {
-                        self.type_infer_expr(expr);
-                        match &decl.decl_type {
-                            // NOTE: This would happen anyways in type_checking
-                            //       but it's fine to do it here.
-                            //       If the type is fresh for a declaration
-                            //       then it must be auto assigned so we can remove it
-                            None | Some(ParsedType::Fresh{..}) => {
-                                decl.decl_type = expr.type_annot.clone();
-                                expr.type_annot.clone()
-                            }
-                            Some(ty) => Some(ty.clone()),
-                        }
-                    },
-                    None => match &decl.decl_type {
-                        Some(ty) => Some(ty.clone()),
-                        None => {
-                            warn!("Internal error decl {:?} has missing type/value", decl);
-                            None
-                        }
-                    }
-                }
+                self.type_infer_decl(decl)
             },
             // TODO: allocator should be of a given type
             ExprKind::New(given_type, _allocator, _init) => {
@@ -188,11 +184,12 @@ impl<'a> TypeInfer<'a> {
                     None => None
                 }
             },
-            ExprKind::Sizeof(ty, ref mut expr) => {
+            ExprKind::Sizeof(_ty, ref mut expr) => {
                 match expr {
                     Some(ref mut inner) => self.type_infer_expr(inner),
                     _ => {}
                 }
+
                 // sizeof always returns size_t
                 Some(ParsedType::new_simple_var_type("size_t"))
             },
@@ -288,11 +285,7 @@ impl<'a> TypeInfer<'a> {
         self.stack.push(&func.block.scope);
 
         for arg in func.args.iter_mut() {
-            if let Some(ref mut val) = arg.val {
-                self.type_infer_expr(val);
-                // and now we can set our type to the inferred type
-                arg.decl_type = val.type_annot.clone();
-            }
+            self.type_infer_decl(arg);
         }
 
         self.type_infer_block(&mut func.block);

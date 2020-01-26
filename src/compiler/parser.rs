@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 extern crate log;
-use log::{info, warn};
+use log::{warn};
 
 pub struct Parser<'a> {
     it: std::iter::Peekable<Lexer<'a>>,
@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
         while parser.it.peek().is_some() {
             match parser.parse_top_level() {
                 Some(TopLevel::StructDecl(decl)) => { program.structs.insert(decl.id.clone(), decl); },
-                Some(TopLevel::FuncDecl(decl)) => { program.functions.insert(decl.name.clone(), decl); },
+                Some(TopLevel::FuncDecl(decl)) => { program.functions.insert(decl.id.clone(), decl); },
                 None => return (None, parser.stack)
             }
         }
@@ -294,8 +294,8 @@ impl<'a> Parser<'a> {
         if lhs.is_unary() {
             // possible declaration
             if try_expect!(self.it, TokenKind::Colon).is_some() {
-                let name = match lhs.kind {
-                    ExprKind::Var(name) => name,
+                let id = match lhs.kind {
+                    ExprKind::Var(id) => id,
                     kind => {
                         warn!("You can't declare a non variable {:?}", kind);
                         return None;
@@ -311,7 +311,7 @@ impl<'a> Parser<'a> {
                 // we have to write an the variable here
                 // because else the value can't refer to itself
                 // which blocks recursive lambdas
-                ty = self.stack.cur().borrow_mut().new_var(name.clone(), Some(ty))
+                ty = self.stack.cur().borrow_mut().new_var(id.clone(), Some(ty))
                                                   .expect("Multiple variables with the same name {{TODO}} better msg");
                
                 let rhs = if try_expect!(self.it, TokenKind::Assign).is_some() {
@@ -319,14 +319,14 @@ impl<'a> Parser<'a> {
                 } else if has_type {
                     None
                 } else {
-                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int for name {:?}", name);
+                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int for name {:?}", id);
                     return None;
                 };
 
                 Some(Expr { type_annot: None,
                     kind: ExprKind::Decl(Box::new(Decl {
-                        name: name,
-                        decl_type: Some(ty),
+                        id: id,
+                        decl_type: ty,
                         val: rhs
                     }))})
             } else {
@@ -743,15 +743,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_decl(&mut self) -> Option<Decl> {
-        let name = self.parse_id()?;
+        let id = self.parse_id()?;
         // TODO: Should we force it to be a single token
         //       in the case of infer assignment i.e. don't allow id ': =' 2
         eat!(self.it, TokenKind::Colon, "':'");
         let decl_type = if !peek_expect!(self.it, TokenKind::Assign) {
-            // NOTE: we have to propagate the failing here
-            Some(self.parse_type()?)
+            self.parse_type()?
         } else {
-            None
+            ScopeStack::new_fresh_type()
         };
 
         let val = if try_expect!(self.it, TokenKind::Assign).is_some() {
@@ -761,16 +760,17 @@ impl<'a> Parser<'a> {
         };
 
         return Some(Decl {
-            name: name,
+            id: id,
             decl_type: decl_type,
             val: val
         })
     }
 
     fn parse_struct(&mut self) -> Option<Struct> {
-        let id = match expect!(self.it, TokenKind::Ident(_), "identifier") {
-            Some(id) => id.transform(|x| x.into_ident().unwrap()),
-            Some(_) | None => return None,
+        let id = if let Some(id) = expect!(self.it, TokenKind::Ident(_), "id") {
+            id.transform(|x| x.into_ident().unwrap())
+        } else {
+            return None;
         };
 
         let gen_args = if try_expect!(self.it, TokenKind::LAngle).is_some() {
@@ -793,13 +793,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_opt_decl(&mut self) -> Option<Decl> {
-        let name = self.parse_id()?;
+        let id = self.parse_id()?;
         let (decl_type, val) = if try_expect!(self.it, TokenKind::Colon).is_some() {
             let decl_type = if !peek_expect!(self.it, TokenKind::Assign) {
-                // NOTE: we have to propagate the failing here
-                Some(self.parse_type()?)
+                self.parse_type()?
             } else {
-                None
+                ScopeStack::new_fresh_type()
             };
 
             let val = if try_expect!(self.it, TokenKind::Assign).is_some() {
@@ -810,10 +809,10 @@ impl<'a> Parser<'a> {
 
             (decl_type, val)
         } else {
-            (None, None)
+            (ScopeStack::new_fresh_type(), None)
         };
 
-        return Some(Decl { name, decl_type, val })
+        return Some(Decl { id, decl_type, val })
     }
 
     fn parse_lambda(&mut self) -> Option<Lambda> {
@@ -835,7 +834,7 @@ impl<'a> Parser<'a> {
 
         for arg in args.iter_mut() {
             self.stack.cur().borrow_mut()
-                .new_var(arg.name.clone(), arg.decl_type.clone())
+                .new_var(arg.id.clone(), Some(arg.decl_type.clone()))
                 .expect("Variable already exists with variable name {TODO}");
         }
         
@@ -857,7 +856,7 @@ impl<'a> Parser<'a> {
             vec![]
         };
 
-        let name = self.parse_id()?;
+        let id = self.parse_id()?;
 
         // since arguments could have default values relating to the function itself
         // i.e. fn fib(n: usize, inner := fib) => n <= 1 ? 1 : inner(n - 1) + inner(n - 2)
@@ -872,14 +871,14 @@ impl<'a> Parser<'a> {
             warn!("Internal error new_fresh_type returned a non fresh type");
             return None
         };
-        self.stack.top().borrow_mut().new_var(name.clone(), Some(fresh));
+        self.stack.top().borrow_mut().new_var(id.clone(), Some(fresh));
 
         // push a new scope
         self.stack.push_new();
 
         eat!(self.it, TokenKind::LParen, "'('");
 
-        // do note that unlike the function name
+        // do note that unlike the function id
         // the arguments can't be self referential (i.e. you they can't refer to themselves)
         // so you can't have something like fn fib(n: usize, actual: \n => n <= 1 ? 1 : actual(n - 1) + actual(n - 2) ) => actual(n)
         // this may change in the future but currently isn't allowed
@@ -896,8 +895,8 @@ impl<'a> Parser<'a> {
         let mut arg_types = vec![];
         for arg in args.iter_mut() {
             arg_types.push(self.stack.cur().borrow_mut()
-                .new_var(arg.name.clone(), arg.decl_type.clone())
-                .expect("Variable already exists with variable name {TODO}"));
+                .new_var(arg.id.clone(), Some(arg.decl_type.clone()))
+                .expect("Variable already exists with variable id {TODO}"));
         }
 
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
@@ -911,7 +910,7 @@ impl<'a> Parser<'a> {
 
         let func = ParsedType::Func { args: arg_types, ret: Box::new(ret.clone()), gen_args: gen_args.clone() };
         self.stack.set_fresh(fresh_id, func);
-        Some(Function { gen_args, name, args, block, ret })
+        Some(Function { gen_args, id, args, block, ret })
     }
 }
 

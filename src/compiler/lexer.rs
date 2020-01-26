@@ -356,8 +356,8 @@ impl<'a> Iterator for Lexer<'a> {
           but it'll just be less readable (I've experimented)
          */
 
-        let start_line = self.line;
-        let start_col = self.col;
+        let line = self.line;
+        let col = self.col;
         // The byte_offset points to the start of the token
         let start_byte_offset = self.byte_offset;
 
@@ -517,8 +517,7 @@ impl<'a> Iterator for Lexer<'a> {
             Some(other) => return Some(Err(ErrorToken::new(other.to_string(), self.line, self.col))),
             None => return None
         };
-        let line = (start_line, self.line);
-        let col = (start_col, self.col);
+
         let byte_offset = (start_byte_offset, self.byte_offset);
         Some(Ok(Token::new(kind, Span { line, col, byte_offset })))
     }

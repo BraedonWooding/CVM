@@ -32,7 +32,7 @@ pub struct Block {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub gen_args: IdentList,
-    pub name: Ident,
+    pub id: Ident,
     pub args: DeclList,
     pub ret: ParsedType,
     // short hand => is converted to a return block
@@ -54,10 +54,16 @@ pub struct Struct {
     pub decls: DeclList,
 }
 
+impl Struct {
+    pub fn find_member(&mut self, id: &Ident) {
+        self.decls.iter().find(|&x| x.id == *id);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Decl {
-    pub name: Ident,
-    pub decl_type: Option<ParsedType>,
+    pub id: Ident,
+    pub decl_type: ParsedType,
     pub val: Option<Expr>
 }
 

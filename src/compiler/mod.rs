@@ -43,10 +43,10 @@ impl<T> std::ops::Deref for Spanned<T> {
 
 #[derive(Clone, Default)]
 pub struct Span {
-    /// Represents the line range of this span
-    pub line: (usize, usize),
-    /// Represents the col range of this span
-    pub col: (usize, usize),
+    /// Represents the line point of this span
+    pub line: usize,
+    /// Represents the col point of this
+    pub col: usize,
     /// Represents the byte offset range of this span
     pub byte_offset: (usize, usize)
 }
@@ -76,6 +76,6 @@ impl std::hash::Hash for Span {
 
 impl std::fmt::Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Line {}:{} to Line {}:{}", self.line.0, self.col.0, self.line.1, self.col.1)
+        write!(f, "Line {}:{}", self.line, self.col)
     }
 }

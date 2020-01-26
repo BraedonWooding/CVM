@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// An atomic generator for fresh variables
 static FRESH_GENERATOR: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Default)]
@@ -19,27 +20,15 @@ pub struct Scope {
     pub defer_exprs: Vec<Block>
 }
 
-#[derive(Default)]
-pub struct StructInfo {
-    pub members: Vec<(Ident, ParsedType)>,
-}
-
 pub struct ScopeStack {
     cur_scope: Rc<RefCell<Scope>>,
     top_scope: Rc<RefCell<Scope>>,
     pub fresh_type_env: HashMap<usize, Rc<RefCell<ParsedType>>>,
-    pub stack_info: HashMap<Ident, StructInfo>
 }
 
 impl std::fmt::Debug for Scope {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Scope")
-    }
-}
-
-impl StructInfo {
-    pub fn find_member(&mut self, id: &Ident) {
-        self.members.iter().find(|&x| x.0 == *id);
     }
 }
 
@@ -49,19 +38,7 @@ impl ScopeStack {
             top_scope: Rc::clone(&top),
             cur_scope: Rc::clone(&top),
             fresh_type_env: HashMap::new(),
-            stack_info: HashMap::new(),
         }
-    }
-
-    pub fn has_struct(&self, id: &Ident) -> bool {
-        self.stack_info.contains_key(id)
-    }
-
-    pub fn new_struct(&mut self, id: &Ident) -> &mut StructInfo {
-        if !self.has_struct(id) {
-            self.stack_info.insert(id.clone(), StructInfo::default());
-        }
-        self.stack_info.get_mut(id).unwrap()
     }
 
     pub fn new_fresh_type() -> ParsedType {
@@ -95,13 +72,10 @@ impl ScopeStack {
     }
 
     pub fn lookup_fresh(&mut self, id: usize) -> Rc<RefCell<ParsedType>> {
-        match self.fresh_type_env.get(&id) {
-            Some(ty) => Rc::clone(ty),
-            None => {
-                self.fresh_type_env.insert(id, Rc::new(RefCell::new(ParsedType::Fresh{id})));
-                Rc::clone(self.fresh_type_env.get(&id).expect("Previously inserted type wasn't inserted"))
-            }
-        }
+        // due to Rc::new having a cost (allocation) associated with it
+        // it is generated lazily
+        Rc::clone(self.fresh_type_env.entry(id)
+            .or_insert_with(|| Rc::new(RefCell::new(ParsedType::Fresh{id}))))
     }
 
     /// Precondition: scope's parent must be cur_scope
