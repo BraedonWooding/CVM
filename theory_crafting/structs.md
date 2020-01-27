@@ -58,7 +58,7 @@ struct Set<T> {
     fn contains(const *self, find: T) -> bool {
         // using slices (new idea) and for 'in' it becomes
         // for elem in self.inner[0..self.len]
-        for i = 0; i < self.len; i++ {
+        for i = 0; i < self.len; i += 1 {
             if self.inner[i] == find {
                 return true;
             }
