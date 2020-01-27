@@ -4,7 +4,7 @@
 
 > Made by Braedon Wooding
 
-## Why??
+## Why
 
 Often when teaching I realised I need some way to show how C works behind the scenes and so I thought why not just simulate it.
 
@@ -12,9 +12,9 @@ So yeh this was a stupid idea...
 
 But it may work and that's worth something.
 
-> Rust was chosen because of TUI-RS being absolutely fabulous
+> Rust was chosen because I thought 
 
-## How does it work?
+## How does it work
 
 There are typically 3 ways you can simulate something;
 
@@ -26,11 +26,15 @@ Look at LLV (my first project looking at this problem) for an idea of how this i
 
 ### Pure simluation
 
-Just a huge pain and often useless too hard to show parts of the stack that are useful...
+You just fully simulate the full instruction set on a virtual machine however often this means you lose a ton of source information and it gets hard to show visualisations.
 
-### Hybrid
+It also is very much overkill.
 
-This uses a simple stack based virtual machine (in no way is it intended to be fast) where you write 'Psuedo-C' (which I've named PC) and it'll compile it to equivalent C like code and show you the code alongside the current representation of the stack (stack frames) as well as showing any data structures you are using.
+### Hybrid (the method I chose)
+
+You design a language almost identical to the original (in my case I changed very little) that importantly has the same semantics (sadly meaning the same flaws - i.e. can't return arrays).  This not only allows you to present semantically transpiled C (to allow debugging like views), but also alows you to add features that make visualisations easier (in my case we use a trait based system to allow printing out objects).
+
+It is then compiled to a bytecode that is then executed!
 
 #### Benefits of using this approach (custom language)
 
@@ -227,86 +231,6 @@ fn main() {
 sizeof : fn<T> (_ : T = default) -> usize;
 ```
 
-## Features coming soon
+## Why is X Feature/Library not supported
 
-> These features are still in the specification/idea stage
-
-### Enums
-
-```c
-// enums work as expect
-enum Animals {
-    DOG, // will be 0
-    CAT, // will be 1
-    BAT = 9, // override
-    WOLF, // will be 10
-}
-
-fn print_animal(animal: Animal) {
-    switch (animal) {
-        case DOG: case WOLF: {
-            printf("Woof\n");
-        }
-        // ... so on
-    }
-}
-
-// NOTE: enums are also utilised in unions (as shown in Union section)
-```
-
-### Unions
-
-```c
-// unions are actually implemented as algebraic data types
-// under the hood.  Another term for them is 'tagged unions'
-// i.e. if you put an int inside a union you CAN'T take a float out!
-union Data {
-    // we support rust styled types
-    // i.e. i32 == int32_t and usize == size_t
-    // NOTE: int == int_fast32_t and long = int_fast64_t and so on...
-    // (for uint and ulong and short/ushort)
-    INT = (integer: i32),
-    FLT = (decimal: f32),
-    STR = (string: *char, len: usize) // NOTE: char is always unsigned
-}
-
-fn print_data(data: Data) {
-    switch (data) {
-        case INT: {
-            printf("%d\n", data.integer);
-        }
-        case FLT: {
-            printf("%f\n", data.decimal);
-        }
-        case STR: {
-            printf("%.*s\n", data.len, data.string);
-        }
-    }
-}
-
-fn main() {
-    // you construct them through this way
-    print_data(new Data { .INT = { 5 } }); // '5'
-}
-```
-
-Downsides currently are that they don't really have a lot of interaction with generics and no pattern matching makes them bit of a pain in cases...
-
-You can force a change of type through:
-
-```c
-union Binary32Float {
-    BINARY = (rep: i32),
-    FLOAT  = (val: f32)
-}
-
-fn fltToData(flt: f32) => new Binary32Float { .FLOAT = { flt } };
-fn printRep(data: Binary32Float) {
-    // all unions have a '_type' field
-    // and we can change the type explicitly this way
-    data._type = BINARY;
-    print("{}", data.rep);
-}
-```
-
-There is a bit of compiler linting making you have to check the type before you are gonna use it (unless you explicitly set it).  If you try to print it out it'll just print out the type!
+Check out [theory crafting](theory_crafting/) to see features that are in their design phase and [proposals](proposals/) to see fully designed features.

@@ -6,6 +6,8 @@ Note: CVM is not a fully compliant C compiler and the std is not a fully complia
 
 Posix is currently not supported by CVM but this won't last forever there are plans to eventually support it.
 
+A different theory crafting section will be made for posix support.
+
 ## Libraries that are fully supported
 
 Note that macros are always implemented as constants.
