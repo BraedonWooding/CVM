@@ -1,5 +1,6 @@
 extern crate cvm_lib;
 use cvm_lib::*;
+use cvm_lib::compiler::*;
 
 macro_rules! create_type {
     (Var $id:tt) => {
@@ -21,22 +22,28 @@ macro_rules! create_type {
 
 macro_rules! constant {
     (Int $n:expr) => {
-        Expr { kind: ExprKind::Constant(ConstantKind::Int32($n)), type_annot: Some(create_type!(Var "int")) }
+        Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Int32($n)), Span::default()),
+               type_annot: Some(create_type!(Var "int")) }
     };
     (Double $n:expr) => {
-        Expr { kind: ExprKind::Constant(ConstantKind::Flt64($n)), type_annot: Some(create_type!(Var "double")) }
+        Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Flt64($n)), Span::default()),
+               type_annot: Some(create_type!(Var "double")) }
     };
     (Str $n:expr) => {
-        Expr { kind: ExprKind::Constant(ConstantKind::Str($n)), type_annot: Some(create_type!(Pointer (Var "char"))) }
+        Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Str($n)), Span::default()),
+               type_annot: Some(create_type!(Pointer (Var "char"))) }
     };
     (Char $n:expr) => {
-        Expr { kind: ExprKind::Constant(ConstantKind::Char($n)), type_annot: Some(create_type!(Var "char")) }
+        Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Char($n)), Span::default()),
+               type_annot: Some(create_type!(Var "char")) }
     };
     (Null) => {
-        Expr { kind: ExprKind::Constant(ConstantKind::Null), type_annot: Some(create_type!(Pointer (Var "void"))) }
+        Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Null), Span::default()),
+               type_annot: Some(create_type!(Pointer (Var "void"))) }
     };
     (Bool $n:expr) => {
-        Expr { kind: ExprKind::Constant(ConstantKind::Bool($n)), type_annot: Some(create_type!(Var "bool")) }
+        Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Bool($n)), Span::default()),
+               type_annot: Some(create_type!(Var "bool")) }
     };
 }
 

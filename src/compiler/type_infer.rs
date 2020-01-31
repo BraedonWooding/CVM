@@ -72,15 +72,11 @@ impl<'a> TypeInfer<'a> {
             Some(ref mut expr) => {
                 self.type_infer_expr(expr);
                 if let ParsedType::Fresh{..} = decl.decl_type {
-                    if let Some(ty) = &expr.type_annot {
-                        decl.decl_type = ty.clone();
-                    } else {
-                        return None;
-                    }
+                    decl.decl_type = expr.type_annot.clone();
                 }
             },
             None =>
-                if let ParsedType::Var{..} = decl.decl_type {
+                if let ParsedType::Fresh{..} = decl.decl_type {
                     warn!("Internal error decl {:?} has missing type/value", decl);
                     return None;
                 },
@@ -89,11 +85,11 @@ impl<'a> TypeInfer<'a> {
     }
 
     fn type_infer_expr(&mut self, expr: &mut Expr) {
-        expr.type_annot = match &mut expr.kind {
+        let ty = match &mut expr.kind.inner {
             ExprKind::Assign{ref mut lhs, ref mut rhs, ..} => {
                 self.type_infer_expr(lhs);
                 self.type_infer_expr(rhs);
-                lhs.type_annot.clone()
+                Some(lhs.type_annot.clone())
             },
             ExprKind::Decl(ref mut decl) => {
                 self.type_infer_decl(decl)
@@ -108,14 +104,11 @@ impl<'a> TypeInfer<'a> {
             ExprKind::Unary(args, ref mut expr) => {
                 // type check inner
                 self.type_infer_expr(expr);
-                match &expr.type_annot {
-                    None => None,
-                    Some(ty) => self.apply_unary(&args, ty.clone())
-                }
+                self.apply_unary(&args, expr.type_annot.clone())
             },
             ExprKind::Paren(ref mut inner) => {
                 self.type_infer_expr(inner);
-                inner.type_annot.clone()
+                Some(inner.type_annot.clone())
             },
             ExprKind::Var(id) => {
                 match self.stack.cur().borrow_mut().lookup_var_cond(&id) {
@@ -130,6 +123,8 @@ impl<'a> TypeInfer<'a> {
                 // requires struct lookup
                 // TODO:
                 self.type_infer_expr(expr);
+                // there is a reasonable chance that we don't actually have
+                // a type for the member...
                 None
             },
             ExprKind::GenFuncCall(id, gen_args, args) => {
@@ -146,9 +141,8 @@ impl<'a> TypeInfer<'a> {
                     self.type_infer_expr(arg);
                 }
                 match &func.type_annot {
-                    None => None,
-                    Some(ParsedType::Func{ret, ..}) => Some((**ret).clone()),
-                    Some(ParsedType::Fresh{id}) => {
+                    ParsedType::Func{ret, ..} => Some((**ret).clone()),
+                    ParsedType::Fresh{id} => {
                         let ty_obj = self.stack.lookup_fresh(*id);
                         let ty = ty_obj.borrow_mut();
                         // TODO: Make this recursive to handle a -> b -> func
@@ -162,7 +156,9 @@ impl<'a> TypeInfer<'a> {
                     },
                     _ => {
                         // TODO: Better error...
-                        warn!("Can't perform a call on a pointer, array, vec");
+                        // Especially if the thing is just a 'var'
+                        // then it means we don't know the type (potentially)
+                        warn!("Can't perform a call on a pointer, array, vec on object {:?}", func);
                         None
                     }
                 }
@@ -175,14 +171,7 @@ impl<'a> TypeInfer<'a> {
             ExprKind::Index(ref mut expr, ref mut index) => {
                 self.type_infer_expr(expr);
                 self.type_infer_expr(index);
-                // index always has to be an integral type
-                // but that is enforced in type checking
-                // we can infer the type overall for this
-                // by deref'ing the expr
-                match &expr.type_annot {
-                    Some(ty) => self.deref_type(ty.clone()),
-                    None => None
-                }
+                self.deref_type(expr.type_annot.clone())
             },
             ExprKind::Sizeof(_ty, ref mut expr) => {
                 match expr {
@@ -197,38 +186,43 @@ impl<'a> TypeInfer<'a> {
                 // We'll check they are the same type in the type check phase...
                 self.type_infer_expr(lhs);
                 self.type_infer_expr(rhs);
-                match op {
+                Some(match op {
                     BinopKind::BitOr | BinopKind::BitAnd | BinopKind::BitXor |
                     BinopKind::ShiftRight | BinopKind::ShiftLeft | BinopKind::Add |
                     BinopKind::Sub | BinopKind::Mul | BinopKind::Div | BinopKind::Mod => {
                         // will produce a type equivalent to the types given
                         // the lhs or rhs may not have a specified type yet...
                         // so we can't really infer a proper type so we'll give it a type variable
-                        Some(ScopeStack::new_fresh_type())
+                        ScopeStack::new_fresh_type()
                     },
                     BinopKind::BoolAnd | BinopKind::BoolOr | BinopKind::Equal |
                     BinopKind::NotEqual | BinopKind::LessThan | BinopKind::GreaterThan |
                     BinopKind::LessEqual | BinopKind::GreaterEqual => {
                         // will always produce a boolean
-                        Some(ParsedType::new_simple_var_type("bool"))
+                        ParsedType::new_simple_var_type("bool")
                     }
-                }
+                })
             },
             ExprKind::Ternary{..} => {
                 // TODO:
                 None
             },
-            ExprKind::Constant(kind) => match kind {
-                ConstantKind::Int32(..) => Some(ParsedType::new_simple_var_type("int32_t")),
-                ConstantKind::Flt64(..) => Some(ParsedType::new_simple_var_type("double")),
-                ConstantKind::Str(..) => Some(ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char")))),
-                ConstantKind::Char(..) => Some(ParsedType::new_simple_var_type("char")),
-                ConstantKind::Null => Some(ParsedType::Pointer(Box::new(ScopeStack::new_fresh_type()))),
-                ConstantKind::Bool(..) => Some(ParsedType::new_simple_var_type("bool")),
-            },
+            ExprKind::Constant(kind) => Some(match kind {
+                // TODO: Constants should not convert to int32/flt64
+                //       instead they should convert to a int / flt literal
+                //       that is convertible to all types.
+                //       otherwise it requires ew casts / prefixes
+                // (on second thought im not sure requiring prefixes is bad)
+                ConstantKind::Int32(..) => ParsedType::new_simple_var_type("int32_t"),
+                ConstantKind::Flt64(..) => ParsedType::new_simple_var_type("double"),
+                ConstantKind::Str(..) => ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char"))),
+                ConstantKind::Char(..) => ParsedType::new_simple_var_type("char"),
+                ConstantKind::Null => ParsedType::Pointer(Box::new(ScopeStack::new_fresh_type())),
+                ConstantKind::Bool(..) => ParsedType::new_simple_var_type("bool"),
+            }),
             ExprKind::Let(ref mut inner) => {
                 self.type_infer_expr(inner);
-                inner.type_annot.clone()
+                Some(inner.type_annot.clone())
             },
             ExprKind::Lambda(Lambda{ref mut args, ref mut block, ..}) => {
                 // TODO: support lambdas
@@ -239,6 +233,9 @@ impl<'a> TypeInfer<'a> {
             // because both don't know what type is 'x'
             ExprKind::Uninitialiser => Some(ScopeStack::new_fresh_type())
         };
+        if let Some(ty) = ty {
+            expr.type_annot = ty;
+        }
     }
 
     fn type_infer_block(&mut self, block: &mut Block) {

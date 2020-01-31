@@ -8,6 +8,7 @@
  */
 
 use crate::compiler::*;
+use lexer::{Token, TokenKind, Postfix};
 use scope::Scope;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -79,20 +80,20 @@ pub enum Statement {
 
 #[derive(Debug, Clone)]
 pub struct Expr {
-    pub kind: ExprKind,
-    pub type_annot: Option<ParsedType>
+    pub kind: Spanned<ExprKind>,
+    pub type_annot: ParsedType
 }
 
 impl Expr {
     pub fn is_unary(&self) -> bool {
-        match self.kind {
+        match *self.kind {
             ExprKind::Unary(..) => true,
             _ => self.is_atom(),
         }
     }
 
     pub fn is_atom(&self) -> bool {
-        match self.kind {
+        match *self.kind {
             ExprKind::Paren(..) => true,
             ExprKind::Var(..) => true,
             ExprKind::New(..) => true,
@@ -138,6 +139,43 @@ pub enum ExprKind {
     Uninitialiser,
 }
 
+impl ConstantKind {
+    pub fn from_token(tok: Token) -> Expr {
+        let (kind, ty) = match tok.inner {
+            TokenKind::Number(num, postfix) =>
+                // support all postfixes
+                (ExprKind::Constant(match postfix {
+                    Postfix::i32 => ConstantKind::Int32(num.parse().unwrap()),
+                    Postfix::f64 => ConstantKind::Flt64(num.parse().unwrap()),
+                    _ => panic!("Unhandled option"),
+                }), match postfix {
+                    Postfix::i32 => ParsedType::new_simple_var_type("int"),
+                    Postfix::f64 => ParsedType::new_simple_var_type("double"),
+                    _ => panic!("Unhandled option"),
+                }),
+            TokenKind::Bool(val) =>
+                (ExprKind::Constant(ConstantKind::Bool(val)),
+                 ParsedType::new_simple_var_type("bool")),
+            TokenKind::Str(val) =>
+                // TODO: This would benefit from our testing macro
+                (ExprKind::Constant(ConstantKind::Str(val)),
+                 ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char")))),
+            TokenKind::Null =>
+                // This should be a generic pointer literal
+                (ExprKind::Constant(ConstantKind::Null),
+                 ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("void")))),
+            TokenKind::Character(c) =>
+                (ExprKind::Constant(ConstantKind::Char(c)),
+                 ParsedType::new_simple_var_type("char")),
+            _ => panic!("Unhandled option")
+        };
+        Expr {
+            type_annot: ty,
+            kind: Spanned::new(kind, tok.span)
+        }
+    }
+}
+
 #[derive(Debug, EnumAsInner, Clone)]
 pub enum ConstantKind {
     // only one supported so far
@@ -153,6 +191,10 @@ pub enum ConstantKind {
 
 #[derive(Debug, EnumAsInner, Clone)]
 pub enum ParsedType {
+    /// This is used in the cases of type annotations for expressions
+    /// (and a few others) basically it means that we'll assign a proper
+    /// type later on and don't need to give it a specific fresh id.
+    Unknown,
     Pointer(Box<ParsedType>),
     Array {inner: Box<ParsedType>, len: Box<Expr>},
     Var {id: Ident, gen_args: Vec<ParsedType>},
@@ -168,7 +210,7 @@ impl ParsedType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinopKind {
     BitOr,
     BitAnd,
@@ -190,7 +232,7 @@ pub enum BinopKind {
     Mod,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryKind {
     BitNot,
     Not,
@@ -200,7 +242,7 @@ pub enum UnaryKind {
     Neg
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AssignmentKind {
     Assign,
     MulAssign,

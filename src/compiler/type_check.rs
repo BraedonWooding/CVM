@@ -25,6 +25,12 @@ impl<'a> TypeCheck<'a> {
     pub fn type_check_program(program: &mut Program, stack: &'a mut ScopeStack) {
         let mut checker = TypeCheck { stack, ctx: None };
 
+        for value in program.structs.values_mut() {
+            for decl in value.decls.iter_mut() {
+                checker.type_check_decl(decl);
+            }
+        }
+
         for mut function in program.functions.values_mut() {
             checker.type_check_function(&mut function);
         }
@@ -57,11 +63,13 @@ impl<'a> TypeCheck<'a> {
     fn type_check_block_and_unify(&mut self, block: &mut Block, expr: &mut Expr, unify_with: &ParsedType) {
         self.stack.push(&block.scope);
         self.type_check_expr(expr);
-        if let Some(ref mut inner) = &mut expr.type_annot {
-            self.unify(inner, unify_with);
-        }
+        self.unify(&expr.type_annot, unify_with);
         self.type_check_block(block);
         self.stack.pop();
+    }
+
+    fn type_check_decl(&mut self, decl: &mut Decl) {
+
     }
 
     fn type_check_statement(&mut self, statement: &mut Statement) {
@@ -90,9 +98,7 @@ impl<'a> TypeCheck<'a> {
 
                 if let Some(ref mut expr) = stop {
                     self.type_check_expr(expr);
-                    if let Some(ref mut inner) = &mut expr.type_annot {
-                        self.unify(inner, &ParsedType::new_simple_var_type("bool"));
-                    }
+                    self.unify(&expr.type_annot, &ParsedType::new_simple_var_type("bool"));
                 }
 
                 if let Some(ref mut expr) = step {
@@ -108,9 +114,7 @@ impl<'a> TypeCheck<'a> {
                 self.type_check_expr(inner);
                 // unify with the context!!
                 if let Some(ctx) = self.ctx.clone() {
-                    if let Some(ref mut ty) = &mut inner.type_annot {
-                        self.unify(&ctx, ty);
-                    }
+                    self.unify(&ctx, &inner.type_annot);
                 }
             },
             Statement::Defer => {}
@@ -137,6 +141,11 @@ impl<'a> TypeCheck<'a> {
                 ty => self.occurs(id, &ty),
             },
             ParsedType::Func{args, ret, ..} => args.iter().any(|x| self.occurs(id, x)) || self.occurs(id, ret),
+            ParsedType::Unknown => {
+                warn!("Unknown shouldn't occur in types past type_infer");
+                // we can't say whether or not this type exists in it or not
+                true
+            }
         }
     }
 

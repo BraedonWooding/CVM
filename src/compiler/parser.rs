@@ -130,9 +130,10 @@ macro_rules! parse_binop {
                         return None;
                     }
                 };
+                let span = Span::join(&lhs.kind.span, &rhs.kind.span);
                 Some(Expr {
-                    type_annot: None,
-                    kind: ExprKind::Binop(Box::new(lhs), kind, Box::new(rhs))
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Binop(Box::new(lhs), kind, Box::new(rhs)), span)
                 })
             };
             _ => {
@@ -289,13 +290,25 @@ impl<'a> Parser<'a> {
         Some(Statement::For(init, cond, step, block))
     }
 
+    fn parse_uninit_or_expr(&mut self) -> Option<Expr> {
+        Some(match try_expect!(self.it, TokenKind::Uninitialised) {
+            Some(tok) => Expr {
+                // This isn't a special type it'll be given a fresh one
+                // in the type_infer
+                type_annot: ParsedType::Unknown,
+                kind: Spanned::new(ExprKind::Uninitialiser, tok.span)
+            },
+            None => self.parse_conditional()?,
+        })
+    }
+
     fn parse_expr(&mut self) -> Option<Expr> {
         let lhs = self.parse_conditional()?;
         if lhs.is_unary() {
             // possible declaration
             if try_expect!(self.it, TokenKind::Colon).is_some() {
                 let id = match lhs.kind {
-                    ExprKind::Var(id) => id,
+                    Spanned { inner: ExprKind::Var(id), .. } => id,
                     kind => {
                         warn!("You can't declare a non variable {:?}", kind);
                         return None;
@@ -315,7 +328,7 @@ impl<'a> Parser<'a> {
                                                   .expect("Multiple variables with the same name {{TODO}} better msg");
                
                 let rhs = if try_expect!(self.it, TokenKind::Assign).is_some() {
-                    Some(self.parse_conditional()?)
+                    Some(self.parse_uninit_or_expr()?)
                 } else if has_type {
                     None
                 } else {
@@ -323,12 +336,18 @@ impl<'a> Parser<'a> {
                     return None;
                 };
 
-                Some(Expr { type_annot: None,
-                    kind: ExprKind::Decl(Box::new(Decl {
+                // TODO: @TypeSpan this should use the type span
+                //       but type spans aren't currently implemented
+                let span = match rhs {
+                    Some(ref rhs) => Span::join(&id.span, &rhs.kind.span),
+                    None => id.span.clone()
+                };
+                Some(Expr { type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Decl(Box::new(Decl {
                         id: id,
                         decl_type: ty,
                         val: rhs
-                    }))})
+                    })), span)})
             } else {
                 // assignment i.e. +=
                 let kind = match self.it.peek() {
@@ -343,14 +362,19 @@ impl<'a> Parser<'a> {
                     },
                     _ => return Some(lhs)
                 };
+
+                // note: you can't put '---' here
+                //       that is only for declarations
                 let rhs = Box::new(self.parse_conditional()?);
+
+                let span = Span::join(&lhs.kind.span, &rhs.kind.span);
                 Some(Expr {
-                    type_annot: None,
-                    kind: ExprKind::Assign {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Assign {
                         lhs: Box::new(lhs),
                         rhs: rhs,
                         kind: kind
-                    }
+                    }, span)
                 })
             }
         } else {
@@ -370,7 +394,8 @@ impl<'a> Parser<'a> {
         let is_return = try_expect!(self.it, TokenKind::Return).is_some();
         let inner = self.parse_expr()?;
         if is_return {
-            if let ExprKind::Assign{..} = inner.kind {
+            // TODO: Fix error to be nicer
+            if let ExprKind::Assign{..} = *inner.kind {
                 warn!("Can't return a non conditional (i.e. don't return assignments)");
                 return None;
             }
@@ -525,10 +550,13 @@ impl<'a> Parser<'a> {
 
     fn parse_unary(&mut self) -> Option<Expr> {
         let mut unary_ops = vec![];
+        let mut first = None;
+
         loop {
             match self.it.peek() {
                 Some(Ok(c)) if c.is_unary() => {
                     // TODO: This will probably be a bit prone to bugs...
+                    if let None = first { first = Some(c.span.clone()); }
                     unary_ops.push(token_kind_to_unary(&self.it.next()?.unwrap())?);
                 }
                 _ => break
@@ -537,9 +565,11 @@ impl<'a> Parser<'a> {
 
         let rhs = self.parse_atom()?;
         if unary_ops.len() > 0 {
+            let span = Span::join(&first.unwrap(), &rhs.kind.span);
             Some(Expr {
-                type_annot: None,
-                kind: ExprKind::Unary(unary_ops, Box::new(rhs))
+                type_annot: ParsedType::Unknown,
+                kind: Spanned::new(ExprKind::Unary(unary_ops, Box::new(rhs)),
+                                   span)
             })
         } else {
             Some(rhs)
@@ -576,11 +606,23 @@ impl<'a> Parser<'a> {
             TokenKind::LParen => {
                 let inner = Box::new(self.parse_conditional()?);
                 eat!(self.it, TokenKind::RParen, "')'");
-                Expr { type_annot: None, kind: ExprKind::Paren(inner) }
+                let span = inner.kind.span.clone();
+                // There is no point really finding the full range including
+                // parentheses since any errors that we'll present will be about
+                // the inner object not the parenthesised object
+                // (excluding missing parentheses which is handled elsewhere)
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Paren(inner), span)
+                }
             },
             TokenKind::Ident(_) => {
                 let id = tok.transform(|x| x.into_ident().unwrap());
-                Expr { type_annot: None, kind: ExprKind::Var(id) }
+                let span = id.span.clone();
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Var(id), span)
+                }
             },
             TokenKind::Sizeof => {
                 // sizeof.<T>(t)
@@ -598,7 +640,14 @@ impl<'a> Parser<'a> {
                     return None;
                 }
                 let obj = args.pop().map(Box::new);
-                Expr { type_annot: None, kind: ExprKind::Sizeof(ty, obj) }
+                // TODO: @BUILTIN FUNC SPAN: This is probably wrong
+                //       sizeof.<T>(t) should contain the entire length
+                //       maybe we need an easier way to handle this
+                //       when we parse a list?  (i.e. also return the span?)
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Sizeof(ty, obj), tok.span)
+                }
             },
             TokenKind::New => {
                 let mut gen_args = self.parse_gentype_list()?;
@@ -622,7 +671,15 @@ impl<'a> Parser<'a> {
                     vec![]
                 };
 
-                Expr { type_annot: None, kind: ExprKind::New(ty, arg, init) }
+                // TODO: @BUILTIN FUNC SPAN: This is probably wrong
+                // @SEE Sizeof
+                //       sizeof.<T>(t) should contain the entire length
+                //       maybe we need an easier way to handle this
+                //       when we parse a list?  (i.e. also return the span?)
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::New(ty, arg, init), tok.span)
+                }
             },
             TokenKind::Cast => {
                 // just a function ... like cast.<Out, In>(in: In)
@@ -641,49 +698,37 @@ impl<'a> Parser<'a> {
                     return None;
                 }
                 let obj = Box::new(args.pop().unwrap());
-                Expr { type_annot: None, kind: ExprKind::Cast{ to, from, obj } }
-            },
-            TokenKind::Number(..) => {
-                let Spanned { inner: (num, postfix), span }
-                    = tok.transform(|x| x.into_number().unwrap());
-                // currently only supports int32 and flt32
-                Expr { type_annot: None,
-                    kind: ExprKind::Constant(match postfix {
-                        Postfix::i32 => ConstantKind::Int32(num.parse::<i32>().unwrap()),
-                        Postfix::f64 => ConstantKind::Flt64(num.parse::<f64>().unwrap()),
-                        _ => {
-                            panic!("Unhandled case");
-                        }
-                    })
+
+                // TODO: @BUILTIN FUNC SPAN: This is probably wrong
+                // @SEE Sizeof
+                //       sizeof.<T>(t) should contain the entire length
+                //       maybe we need an easier way to handle this
+                //       when we parse a list?  (i.e. also return the span?)
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Cast{ to, from, obj }, tok.span)
                 }
             },
-            TokenKind::Bool(..) => {
-                let value = tok.transform(|x| x.into_bool().unwrap());
-                Expr { type_annot: None,
-                       kind: ExprKind::Constant(ConstantKind::Bool(*value)) }
-            },
-            TokenKind::Str(..) => {
-                let value = tok.transform(|x| x.into_str().unwrap());
-                Expr { type_annot: None,
-                       kind: ExprKind::Constant(ConstantKind::Str(value.to_string())) }
-            },
-            TokenKind::Null => {
-                Expr { type_annot: None,
-                    kind: ExprKind::Constant(ConstantKind::Null) }
-            },
-            TokenKind::Character(..) => {
-                let value = tok.transform(|x| x.into_character().unwrap());
-                Expr { type_annot: None,
-                    kind: ExprKind::Constant(ConstantKind::Char(*value)) }
-            },
-            TokenKind::Uninitialised => {
-                Expr { type_annot: None, kind: ExprKind::Uninitialiser }
+            TokenKind::Number(..) | TokenKind::Bool(..) | TokenKind::Str(..) |
+            TokenKind::Character(..) | TokenKind::Null => {
+                ConstantKind::from_token(tok)
             },
             TokenKind::Let => {
-                Expr { type_annot: None, kind: ExprKind::Let(Box::new(self.parse_expr()?)) }
+                let inner = Box::new(self.parse_expr()?);
+                let span = inner.kind.span.clone();
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Let(inner), span)
+                }
             },
             TokenKind::Lambda => {
-                Expr { type_annot: None, kind: ExprKind::Lambda(self.parse_lambda()?) }
+                // idk instead of 'name' ill use the 'fn' keyword for pointing
+                // at a lambda
+                let span = tok.span.clone();
+                Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(ExprKind::Lambda(self.parse_lambda()?), span)
+                }
             };
             _ => {
                 warn!("Unknown Token... tried to parse an atom {:?}", self.it.peek());
@@ -697,16 +742,18 @@ impl<'a> Parser<'a> {
         let mut res = lhs;
 
         res = loop {
-            let tmp = Expr { type_annot: None, kind: res.kind };
+            let tmp = Expr { type_annot: ParsedType::Unknown, kind: res.kind };
             res.kind = expect_match!(self.it, tok, {
                 TokenKind::Period => {
                     // member access or function call
                     expect_match!(self.it, tok, {
                         TokenKind::Ident(..) => {
-                            ExprKind::Member(Box::new(tmp), tok.transform(|x| x.into_ident().unwrap()))
+                            let ident = tok.transform(|x| x.into_ident().unwrap());
+                            let joint = Span::join(&tmp.kind.span, &ident.span);
+                            Spanned::new(ExprKind::Member(Box::new(tmp), ident), joint)
                         },
                         TokenKind::LAngle => {
-                            let id = match tmp.kind {
+                            let id = match tmp.kind.inner {
                                 ExprKind::Var(id) => id,
                                 _ => {
                                     warn!("You can only use a generic call through an identifier {:?}", tok);
@@ -716,7 +763,8 @@ impl<'a> Parser<'a> {
                             let gen_args = self.parse_gentype_list()?;
                             eat!(self.it, TokenKind::LParen, "'('");
                             let args = parse_list!(self, parse_conditional, TokenKind::Comma, TokenKind::RParen, "')'");
-                            ExprKind::GenFuncCall(id, gen_args, args)
+                            let span = id.span.clone();
+                            Spanned::new(ExprKind::GenFuncCall(id, gen_args, args), span)
                         };
                         _ => {
                             warn!("Invalid member access / function call {:?}", self.it.peek());
@@ -726,14 +774,17 @@ impl<'a> Parser<'a> {
                 },
                 TokenKind::LParen => {
                     // just a function call
+                    // TODO: Probably should expand to whole length
                     let mut args = parse_list!(self, parse_conditional, TokenKind::Comma, TokenKind::RParen, "')'");
-                    ExprKind::FuncCall(Box::new(tmp), args)
+                    let span = tmp.kind.span.clone();
+                    Spanned::new(ExprKind::FuncCall(Box::new(tmp), args), span)
                 },
                 TokenKind::LBracket => {
                     // index
                     let expr = self.parse_conditional()?;
                     eat!(self.it, TokenKind::RBracket, "']'");
-                    ExprKind::Index(Box::new(tmp), Box::new(expr))
+                    let span = tmp.kind.span.clone();
+                    Spanned::new(ExprKind::Index(Box::new(tmp), Box::new(expr)), span)
                 };
                 _ => break tmp
             });

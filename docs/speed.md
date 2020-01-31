@@ -1,5 +1,7 @@
 # Speeding up CVM
 
+> At the bottom I'll place some todos for speed improvements
+
 CVM was never intended to be 'fast' compared to C but it was meant to be relative. i.e. you could benchmark programs in CVM and expect to see a relative performance difference if you then benchmarked the same thing in C (with no optimisations of course).
 
 Also I want the compiler to be fast ish but since the vast majority of programs will be small (< 5k lines total including libraries).  We also won't have that many optimisations (if any) thus lending ourselves quite a bit of leniancy in this regard.
@@ -44,3 +46,7 @@ Not yet built so eh ?
 ## Speeding up the frontend
 
 Not yet built so eh ?
+
+## Speed Improvements
+
+

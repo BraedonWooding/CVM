@@ -174,7 +174,7 @@ impl Transpiler {
     }
 
     fn transpile_expr(&mut self, expr: &Expr) {
-        match &expr.kind {
+        match &*expr.kind {
             ExprKind::Assign{lhs, rhs, kind} => {
                 self.transpile_expr(&lhs);
                 self.transpile_assignment_op(&kind);
@@ -183,7 +183,9 @@ impl Transpiler {
             ExprKind::Decl(decl) => {
                 self.transpile_decl(&decl);
                 match &decl.val {
-                    Some(Expr { kind: ExprKind::Uninitialiser, .. }) => {},
+                    Some(Expr { kind: Spanned {
+                        inner: ExprKind::Uninitialiser, ..
+                    }, .. }) => {},
                     Some(expr) => {
                         self.builder += " = ";
                         self.transpile_expr(&expr);
@@ -332,6 +334,12 @@ impl Transpiler {
                 if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
                     self.builder += " ";
                 }
+            },
+            ParsedType::Unknown => {
+                self.builder += "???";
+                if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
+                    self.builder += " ";
+                }
             }
         }
     }
@@ -382,7 +390,7 @@ impl Transpiler {
                 }
                 self.transpile_type_rhs(&inner, opts);
             },
-            ParsedType::Var{..} => { /* no op */ },
+            ParsedType::Var{..} | ParsedType::Fresh{..} | ParsedType::Unknown => { /* no op */ },
             ParsedType::Func{args, ret, ..} => {
                 self.builder += ")(";
                 if !args.is_empty() {
@@ -395,8 +403,7 @@ impl Transpiler {
                 }
                 self.builder += ")";
                 self.transpile_type_rhs(&ret, opts | TypeOpts::FUNCTION_RETURN);
-            },
-            ParsedType::Fresh{..} => { }
+            }
         }
     }
 

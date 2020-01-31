@@ -51,6 +51,18 @@ pub struct Span {
     pub byte_offset: (usize, usize)
 }
 
+impl Span {
+    pub fn join(a: &Span, b: &Span) -> Span {
+        use std::cmp;
+        Span {
+            line: cmp::min(a.line, b.line),
+            col: cmp::min(a.col, b.col),
+            byte_offset: (cmp::min(a.byte_offset.0, b.byte_offset.0),
+                          cmp::max(a.byte_offset.1, b.byte_offset.1))
+        }
+    }
+}
+
 impl std::cmp::PartialEq for Span {
     /*
      * Note: Span's are always equatable to each other irregardless of value
