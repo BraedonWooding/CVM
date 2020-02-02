@@ -318,7 +318,7 @@ impl<'a> Parser<'a> {
                 let (mut ty, has_type) = if !peek_expect!(self.it, TokenKind::Assign) {
                     (self.parse_type()?, true)
                 } else {
-                    (ScopeStack::new_fresh_type(), false)
+                    (ParsedType::Unknown, false)
                 };
 
                 // we have to write an the variable here
@@ -801,7 +801,7 @@ impl<'a> Parser<'a> {
         let decl_type = if !peek_expect!(self.it, TokenKind::Assign) {
             self.parse_type()?
         } else {
-            ScopeStack::new_fresh_type()
+            ParsedType::Unknown
         };
 
         let val = if try_expect!(self.it, TokenKind::Assign).is_some() {
@@ -849,7 +849,7 @@ impl<'a> Parser<'a> {
             let decl_type = if !peek_expect!(self.it, TokenKind::Assign) {
                 self.parse_type()?
             } else {
-                ScopeStack::new_fresh_type()
+                ParsedType::Unknown
             };
 
             let val = if try_expect!(self.it, TokenKind::Assign).is_some() {
@@ -860,7 +860,7 @@ impl<'a> Parser<'a> {
 
             (decl_type, val)
         } else {
-            (ScopeStack::new_fresh_type(), None)
+            (ParsedType::Unknown, None)
         };
 
         return Some(Decl { id, decl_type, val })

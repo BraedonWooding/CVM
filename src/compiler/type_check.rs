@@ -147,7 +147,9 @@ impl<'a> TypeCheck<'a> {
                 self.type_check_expr(inner);
                 // unify with the context!!
                 if let Some(ctx) = self.ctx.clone() {
-                    self.unify(&ctx, &inner.type_annot);
+                    self.unify(&inner.type_annot, &ctx);
+                } else {
+                    warn!("No context, this is probably a bug");
                 }
             },
             Statement::Defer => {}
@@ -385,6 +387,7 @@ impl<'a> TypeCheck<'a> {
                     warn!("Occurs check failed, infinite type in {}", id);
                 } else {
                     // id := other
+                    warn!("Settings {:?} to {:?}", id, other);
                     self.set_type(*id, (*other).clone());
                 }
             },

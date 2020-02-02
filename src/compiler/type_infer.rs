@@ -71,12 +71,14 @@ impl<'a> TypeInfer<'a> {
         match decl.val {
             Some(ref mut expr) => {
                 self.type_infer_expr(expr);
-                if let ParsedType::Fresh{..} = decl.decl_type {
+                if let ParsedType::Unknown = decl.decl_type {
                     decl.decl_type = expr.type_annot.clone();
+                    let cpy = self.stack.cur().borrow_mut().lookup_var_cond(&decl.id).unwrap();
+                    std::mem::replace(&mut *cpy.borrow_mut(), decl.decl_type.clone());
                 }
             },
             None =>
-                if let ParsedType::Fresh{..} = decl.decl_type {
+                if let ParsedType::Unknown = decl.decl_type {
                     warn!("Internal error decl {:?} has missing type/value", decl);
                     return None;
                 },

@@ -1,7 +1,12 @@
-fn main() {
+// TODO: This should probably
+//       be given a void return type
+//       since none was defined
+fn main() -> int {
     let sum := 0;
     for i := 0; i < 10; i += 1 {
         sum += i;
     }
-    return 0;
+
+    j := 0;
+    return j;
 }
