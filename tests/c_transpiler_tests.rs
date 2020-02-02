@@ -23,27 +23,27 @@ macro_rules! create_type {
 macro_rules! constant {
     (Int $n:expr) => {
         Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Int32($n)), Span::default()),
-               type_annot: Some(create_type!(Var "int")) }
+               type_annot: create_type!(Var "int") }
     };
     (Double $n:expr) => {
         Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Flt64($n)), Span::default()),
-               type_annot: Some(create_type!(Var "double")) }
+               type_annot: create_type!(Var "double") }
     };
     (Str $n:expr) => {
         Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Str($n)), Span::default()),
-               type_annot: Some(create_type!(Pointer (Var "char"))) }
+               type_annot: create_type!(Pointer (Var "char")) }
     };
     (Char $n:expr) => {
         Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Char($n)), Span::default()),
-               type_annot: Some(create_type!(Var "char")) }
+               type_annot: create_type!(Var "char") }
     };
     (Null) => {
         Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Null), Span::default()),
-               type_annot: Some(create_type!(Pointer (Var "void"))) }
+               type_annot: create_type!(Pointer (Var "void")) }
     };
     (Bool $n:expr) => {
         Expr { kind: Spanned::new(ExprKind::Constant(ConstantKind::Bool($n)), Span::default()),
-               type_annot: Some(create_type!(Var "bool")) }
+               type_annot: create_type!(Var "bool") }
     };
 }
 
