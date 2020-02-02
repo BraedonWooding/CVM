@@ -79,6 +79,14 @@ fn main() -> std::io::Result<()> {
                 println!("== Basic Typed AST Finished ==");
             }
 
+            TypeCheck::type_check_program(&mut ast, &mut stack);
+
+            if sub_matches.is_present("typed-ast") {
+                println!("== Fully Typed AST Started ==");
+                println!("{:#?}", ast);
+                println!("== Fully Typed AST Finished ==");
+            }
+
             if sub_matches.is_present("type-tables") {
                 println!("== Type Tables Started ==");
                 println!("{:#?}", stack.fresh_type_env);

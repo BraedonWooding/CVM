@@ -71,6 +71,10 @@ impl ScopeStack {
         }
     }
 
+    pub fn lookup_fresh_immut(&self, id: usize) -> Option<&Rc<RefCell<ParsedType>>> {
+        self.fresh_type_env.get(&id).clone()
+    }
+
     pub fn lookup_fresh(&mut self, id: usize) -> Rc<RefCell<ParsedType>> {
         // due to Rc::new having a cost (allocation) associated with it
         // it is generated lazily

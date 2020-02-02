@@ -56,8 +56,8 @@ pub struct Struct {
 }
 
 impl Struct {
-    pub fn find_member(&mut self, id: &Ident) {
-        self.decls.iter().find(|&x| x.id == *id);
+    pub fn find_member(&self, id: &Ident) -> Option<&Decl> {
+        self.decls.iter().find(|&x| x.id == *id)
     }
 }
 
