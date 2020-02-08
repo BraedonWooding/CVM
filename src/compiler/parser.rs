@@ -1,20 +1,20 @@
-use crate::logger::*;
 use crate::compiler::*;
+use crate::logger::*;
 
-use lexer::*;
 use ast::*;
+use lexer::*;
 use scope::*;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 extern crate log;
-use log::{warn};
+use log::warn;
 
 pub struct Parser<'a> {
     it: std::iter::Peekable<Lexer<'a>>,
-    stack: ScopeStack
+    stack: ScopeStack,
 }
 
 macro_rules! expect {
@@ -26,7 +26,7 @@ macro_rules! expect {
                 } else {
                     None
                 }
-            },
+            }
             Some(Ok(Token { inner, .. })) => {
                 log_expected_token($err, &inner);
                 None
@@ -57,7 +57,7 @@ macro_rules! peek_expect {
         match $it.peek() {
             Some(Ok(Token { inner: $wanted, .. })) => true,
             Some(Err(other)) => panic!("Weird error {:?}", other),
-            _ => false
+            _ => false,
         }
     };
 }
@@ -95,7 +95,9 @@ macro_rules! parse_list {
 
 macro_rules! eat {
     ($it:expr, $wanted:pat, $err:expr) => {
-        if expect!($it, $wanted, $err).is_none() { return None; }
+        if expect!($it, $wanted, $err).is_none() {
+            return None;
+        }
     };
 }
 
@@ -156,7 +158,7 @@ fn token_kind_to_assignment(tok: &TokenKind) -> Option<AssignmentKind> {
         TokenKind::BitAndAssign => Some(AssignmentKind::BitAndAssign),
         TokenKind::BitXorAssign => Some(AssignmentKind::BitXorAssign),
         TokenKind::BitOrAssign => Some(AssignmentKind::BitOrAssign),
-        _ => None
+        _ => None,
     }
 }
 
@@ -192,14 +194,14 @@ fn token_kind_to_unary(tok: &TokenKind) -> Option<UnaryKind> {
         TokenKind::Add => Some(UnaryKind::Pos),
         TokenKind::Sub => Some(UnaryKind::Neg),
         TokenKind::BitNot => Some(UnaryKind::BitNot),
-        _ => None
+        _ => None,
     }
 }
 
 #[derive(Debug)]
 enum TopLevel {
     StructDecl(Struct),
-    FuncDecl(Function)
+    FuncDecl(Function),
 }
 
 impl<'a> Parser<'a> {
@@ -208,17 +210,21 @@ impl<'a> Parser<'a> {
             top_scope: Rc::new(RefCell::new(Scope::default())),
             structs: HashMap::new(),
             functions: HashMap::new(),
-            filename: filename.to_string()
+            filename: filename.to_string(),
         };
         let mut parser = Parser::<'a> {
             it: stream.peekable(),
-            stack: ScopeStack::new(&program.top_scope)
+            stack: ScopeStack::new(&program.top_scope),
         };
         while parser.it.peek().is_some() {
             match parser.parse_top_level() {
-                Some(TopLevel::StructDecl(decl)) => { program.structs.insert(decl.id.clone(), decl); },
-                Some(TopLevel::FuncDecl(decl)) => { program.functions.insert(decl.id.clone(), decl); },
-                None => return (None, parser.stack)
+                Some(TopLevel::StructDecl(decl)) => {
+                    program.structs.insert(decl.id.clone(), decl);
+                }
+                Some(TopLevel::FuncDecl(decl)) => {
+                    program.functions.insert(decl.id.clone(), decl);
+                }
+                None => return (None, parser.stack),
             }
         }
         (Some(program), parser.stack)
@@ -254,9 +260,14 @@ impl<'a> Parser<'a> {
                 else_block = Some(self.parse_block(true)?);
                 break;
             }
-        };
+        }
 
-        Some(Statement::If{if_cond, if_block, else_if, else_block})
+        Some(Statement::If {
+            if_cond,
+            if_block,
+            else_if,
+            else_block,
+        })
     }
 
     fn parse_while(&mut self) -> Option<Statement> {
@@ -274,16 +285,20 @@ impl<'a> Parser<'a> {
                 self.stack.cur().borrow_mut().defer_exprs.push(block);
                 Some(Statement::Defer)
             }
-            None => None
+            None => None,
         }
     }
 
     fn parse_for(&mut self) -> Option<Statement> {
         self.stack.push_new();
         let init = parse_or_token!(self, parse_expr, TokenKind::SemiColon, "';'").map(Box::new);
-        let cond = parse_or_token!(self, parse_conditional, TokenKind::SemiColon, "';'").map(Box::new);
-        let step = if peek_expect!(self.it, TokenKind::LBrace) { None }
-                   else { Some(Box::new(self.parse_expr()?)) };
+        let cond =
+            parse_or_token!(self, parse_conditional, TokenKind::SemiColon, "';'").map(Box::new);
+        let step = if peek_expect!(self.it, TokenKind::LBrace) {
+            None
+        } else {
+            Some(Box::new(self.parse_expr()?))
+        };
         let block = self.parse_block(false)?;
         self.stack.pop();
 
@@ -296,7 +311,7 @@ impl<'a> Parser<'a> {
                 // This isn't a special type it'll be given a fresh one
                 // in the type_infer
                 type_annot: ParsedType::Unknown,
-                kind: Spanned::new(ExprKind::Uninitialiser, tok.span)
+                kind: Spanned::new(ExprKind::Uninitialiser, tok.span),
             },
             None => self.parse_conditional()?,
         })
@@ -308,7 +323,10 @@ impl<'a> Parser<'a> {
             // possible declaration
             if try_expect!(self.it, TokenKind::Colon).is_some() {
                 let id = match lhs.kind {
-                    Spanned { inner: ExprKind::Var(id), .. } => id,
+                    Spanned {
+                        inner: ExprKind::Var(id),
+                        ..
+                    } => id,
                     kind => {
                         warn!("You can't declare a non variable {:?}", kind);
                         return None;
@@ -324,15 +342,22 @@ impl<'a> Parser<'a> {
                 // we have to write an the variable here
                 // because else the value can't refer to itself
                 // which blocks recursive lambdas
-                ty = self.stack.cur().borrow_mut().new_var(id.clone(), Some(ty))
-                                                  .expect("Multiple variables with the same name {{TODO}} better msg");
-               
+                ty = self
+                    .stack
+                    .cur()
+                    .borrow_mut()
+                    .new_var(id.clone(), Some(ty))
+                    .expect("Multiple variables with the same name {{TODO}} better msg");
+
                 let rhs = if try_expect!(self.it, TokenKind::Assign).is_some() {
                     Some(self.parse_uninit_or_expr()?)
                 } else if has_type {
                     None
                 } else {
-                    warn!("Was expecting and/or type/value i.e. a := 2 or a : int for name {:?}", id);
+                    warn!(
+                        "Was expecting and/or type/value i.e. a := 2 or a : int for name {:?}",
+                        id
+                    );
                     return None;
                 };
 
@@ -340,14 +365,19 @@ impl<'a> Parser<'a> {
                 //       but type spans aren't currently implemented
                 let span = match rhs {
                     Some(ref rhs) => Span::join(&id.span, &rhs.kind.span),
-                    None => id.span.clone()
+                    None => id.span.clone(),
                 };
-                Some(Expr { type_annot: ParsedType::Unknown,
-                    kind: Spanned::new(ExprKind::Decl(Box::new(Decl {
-                        id: id,
-                        decl_type: ty,
-                        val: rhs
-                    })), span)})
+                Some(Expr {
+                    type_annot: ParsedType::Unknown,
+                    kind: Spanned::new(
+                        ExprKind::Decl(Box::new(Decl {
+                            id: id,
+                            decl_type: ty,
+                            val: rhs,
+                        })),
+                        span,
+                    ),
+                })
             } else {
                 // assignment i.e. +=
                 let kind = match self.it.peek() {
@@ -359,8 +389,8 @@ impl<'a> Parser<'a> {
                                 return None;
                             }
                         }
-                    },
-                    _ => return Some(lhs)
+                    }
+                    _ => return Some(lhs),
                 };
 
                 // note: you can't put '---' here
@@ -370,11 +400,14 @@ impl<'a> Parser<'a> {
                 let span = Span::join(&lhs.kind.span, &rhs.kind.span);
                 Some(Expr {
                     type_annot: ParsedType::Unknown,
-                    kind: Spanned::new(ExprKind::Assign {
-                        lhs: Box::new(lhs),
-                        rhs: rhs,
-                        kind: kind
-                    }, span)
+                    kind: Spanned::new(
+                        ExprKind::Assign {
+                            lhs: Box::new(lhs),
+                            rhs: rhs,
+                            kind: kind,
+                        },
+                        span,
+                    ),
                 })
             }
         } else {
@@ -395,7 +428,7 @@ impl<'a> Parser<'a> {
         let inner = self.parse_expr()?;
         if is_return {
             // TODO: Fix error to be nicer
-            if let ExprKind::Assign{..} = *inner.kind {
+            if let ExprKind::Assign { .. } = *inner.kind {
                 warn!("Can't return a non conditional (i.e. don't return assignments)");
                 return None;
             }
@@ -403,7 +436,11 @@ impl<'a> Parser<'a> {
 
         // all statements that aren't if/for/while/defer... require a semicolon
         eat!(self.it, TokenKind::SemiColon, "';'");
-        Some(if is_return { Statement::Return(inner) } else { Statement::Expr(inner) })
+        Some(if is_return {
+            Statement::Return(inner)
+        } else {
+            Statement::Expr(inner)
+        })
     }
 
     fn parse_block(&mut self, create_scope: bool) -> Option<Block> {
@@ -424,7 +461,10 @@ impl<'a> Parser<'a> {
         if create_scope {
             self.stack.pop();
         }
-        Some(Block { scope: scope, statements: list })
+        Some(Block {
+            scope: scope,
+            statements: list,
+        })
     }
 
     fn parse_id(&mut self) -> Option<Ident> {
@@ -483,7 +523,10 @@ impl<'a> Parser<'a> {
         while try_expect!(self.it, TokenKind::LBracket).is_some() {
             let len = self.parse_conditional()?;
             eat!(self.it, TokenKind::RBracket, "']'");
-            ty = ParsedType::Array{inner: Box::new(ty), len: Box::new(len)};
+            ty = ParsedType::Array {
+                inner: Box::new(ty),
+                len: Box::new(len),
+            };
         }
 
         Some(ty)
@@ -556,10 +599,12 @@ impl<'a> Parser<'a> {
             match self.it.peek() {
                 Some(Ok(c)) if c.is_unary() => {
                     // TODO: This will probably be a bit prone to bugs...
-                    if let None = first { first = Some(c.span.clone()); }
+                    if let None = first {
+                        first = Some(c.span.clone());
+                    }
                     unary_ops.push(token_kind_to_unary(&self.it.next()?.unwrap())?);
                 }
-                _ => break
+                _ => break,
             }
         }
 
@@ -568,8 +613,7 @@ impl<'a> Parser<'a> {
             let span = Span::join(&first.unwrap(), &rhs.kind.span);
             Some(Expr {
                 type_annot: ParsedType::Unknown,
-                kind: Spanned::new(ExprKind::Unary(unary_ops, Box::new(rhs)),
-                                   span)
+                kind: Spanned::new(ExprKind::Unary(unary_ops, Box::new(rhs)), span),
             })
         } else {
             Some(rhs)
@@ -581,14 +625,24 @@ impl<'a> Parser<'a> {
             let key = self.parse_id()?;
             eat!(self.it, TokenKind::Assign, "'='");
             let val = if try_expect!(self.it, TokenKind::LBrace).is_some() {
-                parse_list!(self, parse_initialiser, TokenKind::Comma, TokenKind::RBrace, "'}'")
+                parse_list!(
+                    self,
+                    parse_initialiser,
+                    TokenKind::Comma,
+                    TokenKind::RBrace,
+                    "'}'"
+                )
             } else {
-                vec![Initialiser::Val{val: self.parse_conditional()?}]
+                vec![Initialiser::Val {
+                    val: self.parse_conditional()?,
+                }]
             };
 
-            Some(Initialiser::Key{key, val})
+            Some(Initialiser::Key { key, val })
         } else {
-            Some(Initialiser::Val{val: self.parse_conditional()?})
+            Some(Initialiser::Val {
+                val: self.parse_conditional()?,
+            })
         }
     }
 
@@ -742,7 +796,10 @@ impl<'a> Parser<'a> {
         let mut res = lhs;
 
         res = loop {
-            let tmp = Expr { type_annot: ParsedType::Unknown, kind: res.kind };
+            let tmp = Expr {
+                type_annot: ParsedType::Unknown,
+                kind: res.kind,
+            };
             res.kind = expect_match!(self.it, tok, {
                 TokenKind::Period => {
                     // member access or function call
@@ -813,8 +870,8 @@ impl<'a> Parser<'a> {
         return Some(Decl {
             id: id,
             decl_type: decl_type,
-            val: val
-        })
+            val: val,
+        });
     }
 
     fn parse_struct(&mut self) -> Option<Struct> {
@@ -840,7 +897,12 @@ impl<'a> Parser<'a> {
 
         eat!(self.it, TokenKind::LBrace, "'{'");
         let decls = parse_list!(self, parse_decl, TokenKind::Comma, TokenKind::RBrace, "'}'");
-        Some(Struct { id, gen_args, decls, is_list })
+        Some(Struct {
+            id,
+            gen_args,
+            decls,
+            is_list,
+        })
     }
 
     fn parse_opt_decl(&mut self) -> Option<Decl> {
@@ -863,7 +925,7 @@ impl<'a> Parser<'a> {
             (ParsedType::Unknown, None)
         };
 
-        return Some(Decl { id, decl_type, val })
+        return Some(Decl { id, decl_type, val });
     }
 
     fn parse_lambda(&mut self) -> Option<Lambda> {
@@ -877,21 +939,32 @@ impl<'a> Parser<'a> {
 
         let mut args = if try_expect!(self.it, TokenKind::LParen).is_some() {
             // arg list
-            parse_list!(self, parse_opt_decl, TokenKind::Comma, TokenKind::RParen, "')'")
+            parse_list!(
+                self,
+                parse_opt_decl,
+                TokenKind::Comma,
+                TokenKind::RParen,
+                "')'"
+            )
         } else {
             // single arg
             vec![self.parse_opt_decl()?]
         };
 
         for arg in args.iter_mut() {
-            self.stack.cur().borrow_mut()
+            self.stack
+                .cur()
+                .borrow_mut()
                 .new_var(arg.id.clone(), Some(arg.decl_type.clone()))
                 .expect("Variable already exists with variable name {TODO}");
         }
-        
+
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
             let cond = self.parse_conditional()?;
-            Block { statements: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
+            Block {
+                statements: vec![Statement::Return(cond)],
+                scope: Rc::clone(&self.stack.cur()),
+            }
         } else {
             self.parse_block(false)?
         };
@@ -916,13 +989,16 @@ impl<'a> Parser<'a> {
         // This does introduce type variable pollution so we probably want to at one point
         // introduce a new type variable class called TempTypeVar that is not intended to last longer than
         // a declaration so that we don't have to waste a ton of letters on functions
-        let (fresh, fresh_id) = if let ParsedType::Fresh{id} = ScopeStack::new_fresh_type() {
-            (ParsedType::Fresh{id}, id)
+        let (fresh, fresh_id) = if let ParsedType::Fresh { id } = ScopeStack::new_fresh_type() {
+            (ParsedType::Fresh { id }, id)
         } else {
             warn!("Internal error new_fresh_type returned a non fresh type");
-            return None
+            return None;
         };
-        self.stack.top().borrow_mut().new_var(id.clone(), Some(fresh));
+        self.stack
+            .top()
+            .borrow_mut()
+            .new_var(id.clone(), Some(fresh));
 
         // push a new scope
         self.stack.push_new();
@@ -945,23 +1021,39 @@ impl<'a> Parser<'a> {
         // ...
         let mut arg_types = vec![];
         for arg in args.iter_mut() {
-            arg_types.push(self.stack.cur().borrow_mut()
-                .new_var(arg.id.clone(), Some(arg.decl_type.clone()))
-                .expect("Variable already exists with variable id {TODO}"));
+            arg_types.push(
+                self.stack
+                    .cur()
+                    .borrow_mut()
+                    .new_var(arg.id.clone(), Some(arg.decl_type.clone()))
+                    .expect("Variable already exists with variable id {TODO}"),
+            );
         }
 
         let block = if try_expect!(self.it, TokenKind::FatArrow).is_some() {
             let cond = self.parse_conditional()?;
-            Block { statements: vec![Statement::Return(cond)], scope: Rc::clone(&self.stack.cur()) }
+            Block {
+                statements: vec![Statement::Return(cond)],
+                scope: Rc::clone(&self.stack.cur()),
+            }
         } else {
             self.parse_block(false)?
         };
 
         self.stack.pop();
 
-        let func = ParsedType::Func { args: arg_types, ret: Box::new(ret.clone()), gen_args: gen_args.clone() };
+        let func = ParsedType::Func {
+            args: arg_types,
+            ret: Box::new(ret.clone()),
+            gen_args: gen_args.clone(),
+        };
         self.stack.set_fresh(fresh_id, func);
-        Some(Function { gen_args, id, args, block, ret })
+        Some(Function {
+            gen_args,
+            id,
+            args,
+            block,
+            ret,
+        })
     }
 }
-

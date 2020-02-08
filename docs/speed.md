@@ -39,6 +39,41 @@ After inference it does type checking, this associates the final types and will 
 
 > However we do improve the efficiency by flattening the type table into a vector lookup and reduce the cycles that could exist (i.e. we reduce the case of `a -> b -> c -> int` and just reduce it to always `a -> int` - of course `b -> int` and `c -> int` always get reduced, this includes cases like `a -> b -> c` which get reduced to `a -> c` and of course b becomes `b -> c`).
 
+## Type Definition Tables
+
+We actually don't care about the type definitions till we get to type checking.
+
+This even includes std types, they just are counted as 'var' types (which is basically just a type that has been given a name).
+
+Even functions defined in external modules don't need a definition till type checking (what happens is we just say - oh the result will just be some 'fresh' placeholder type 'a' that we'll unify with the real type, same happens with args).
+
+However regardless once we get to type checking and unification we need the definition table.  This is different to the type fresh table which holds what type each fresh placeholder type has.  The definition table holds a lot of meta data about types, importantly it fills structs in with padding (according to C rules) as well as associates types with their underlying representation.
+
+There are 4 variants of types in this definition table.
+
+- Integral Type; i.e. int, uint, usize, isize, ...
+- Floating Pt Type; i.e. float, double, ...
+- Type Aliases; i.e. 'typedef a int'
+  - Interesting note: `*void` is actually a typedef for `*u8` this is because fundamentally they are identical (all casts to from u8 is valid just as much as void)
+    - This is done because typedefs are implemented through a ParsedType -> TypeDefinition ruling, this allows us to express some other complex types simpler too
+    - i.e. `int[..]` maps to `DynArray<int>`
+    - Of course users don't get to do these weird defs
+
+The table is indexed a little weirdly, basically it is ParsedType -> TypeDefinition, and ParsedType's are hashed according to;
+
+- ParsedType::Var just hashes it's name
+- ParsedType::Ptr hashes it's inner value
+  - Yes this means that void* clashes with void
+    - Turns out that we have very few ptr types so this isn't really a problem (hash collisions happen anyways)
+- ParsedType::Array just hashes the inner value
+  - Same problems as Ptr of course, this also means that it ignores the constant factor
+- ParsedType::DynArray just hashes inner value
+- ParsedType::Fresh hashes fresh value
+  - Technically this really should never happen so it currently produces a warning as well
+- ParsedType::Func hashes each of its args and ret and combines them
+  - Highly expensive hash, never use this please, produces a warning upon use.
+- ParsedType::Unknown produces an error
+
 ## Speeding up the interpreter
 
 Not yet built so eh ?

@@ -1,24 +1,7 @@
 extern crate cvm_lib;
-use cvm_lib::*;
-use cvm_lib::compiler::*;
 
-macro_rules! create_type {
-    (Var $id:tt) => {
-        ParsedType::new_simple_var_type($id)
-    };
-    (Pointer ($($inner:tt)+)) => {
-        ParsedType::Pointer(Box::new(create_type!($($inner) +)))
-    };
-    (Array [$len:expr] ($($inner:tt)+)) => {
-        ParsedType::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
-    };
-    (Fresh $id:tt) => {
-        ParsedType::Fresh { id:$id }
-    };
-    (Func $(($($args:tt)+)),* -> $($ret:tt)+) => {
-        ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+)), gen_args: vec![]}
-    };
-}
+use cvm_lib::compiler::*;
+use cvm_lib::*;
 
 macro_rules! constant {
     (Int $n:expr) => {
@@ -48,7 +31,7 @@ macro_rules! constant {
 }
 
 macro_rules! test_type {
-    { $($type:expr => $val:expr),+ } => {
+    { $($type:expr => $val:expr),+ $(,)? } => {
         $({
             let ty = $type;
             let mut transpiler = Transpiler::new(false);
@@ -68,7 +51,7 @@ fn type_tests() {
         create_type!(Array[constant!(Int 5)] (Pointer (Var "int"))) => "int *[5]",
         create_type!(Func (Var "int"), (Pointer (Var "double")),
                            (Array[constant!(Int 5)] (Pointer (Var "int")))
-                    -> Var "void") => "void (*)(int, double *, int *[5])",
+                    -> (Var "void")) => "void (*)(int, double *, int *[5])",
         create_type!(Pointer (Array[constant!(Int 3)] (Var "int"))) => "int (*)[3]",
         // NOTE: this test and the above one may seem weird...
         //       because there is no function name but that is what they are meant to be
@@ -76,6 +59,6 @@ fn type_tests() {
         //       the only case you do is declarations!
         // Also the array disappears because it's a function return type
         // and you can't return arrays in C
-        create_type!(Func -> Pointer (Array[constant!(Int 3)] (Var "int"))) => "int **(*)(void)"
+        create_type!(Func -> (Pointer (Array[constant!(Int 3)] (Var "int")))) => "int **(*)(void)",
     }
 }

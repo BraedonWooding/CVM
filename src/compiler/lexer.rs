@@ -1,5 +1,5 @@
 extern crate log;
-use log::{warn};
+use log::warn;
 
 use crate::compiler::*;
 
@@ -105,7 +105,7 @@ pub enum TokenKind {
     Character(char),
     Str(String),
     Number(String, Postfix),
-    Bool(bool)
+    Bool(bool),
 }
 
 #[derive(Clone)]
@@ -116,11 +116,14 @@ pub struct Lexer<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
 }
 
-pub trait TokenIterator<'a>: std::iter::Iterator<Item=&'a Token> {
+pub trait TokenIterator<'a>: std::iter::Iterator<Item = &'a Token> {
     fn peek(&mut self) -> Option<&'a Token>;
 }
 
-impl<'a, I> TokenIterator<'a> for std::iter::Peekable<I> where I: Iterator<Item = &'a Token> {
+impl<'a, I> TokenIterator<'a> for std::iter::Peekable<I>
+where
+    I: Iterator<Item = &'a Token>,
+{
     fn peek(&mut self) -> Option<&'a Token> {
         self.peek().map(|t| *t)
     }
@@ -143,11 +146,11 @@ impl<'a> Lexer<'a> {
                 self.line += 1;
                 self.col = 1;
                 self.byte_offset += 1;
-            },
+            }
             Some(c) => {
                 self.col += 1;
                 self.byte_offset += c.len_utf8();
-            },
+            }
             None => {}
         }
     }
@@ -161,8 +164,8 @@ impl<'a> Lexer<'a> {
                     } else {
                         self.move_next();
                     }
-                },
-                None => return None
+                }
+                None => return None,
             }
         }
     }
@@ -179,7 +182,7 @@ impl<'a> Lexer<'a> {
             num.push(match self.chars.peek() {
                 Some(c) if !c.is_digit(base) => break,
                 None => break,
-                Some(_) => self.next().unwrap()
+                Some(_) => self.next().unwrap(),
             });
         }
         num
@@ -200,7 +203,10 @@ impl<'a> Lexer<'a> {
             num.push('e');
             self.move_next();
             match self.chars.peek() {
-                Some(c) if *c == '+' || *c == '-' => { num.push(*c); self.move_next(); },
+                Some(c) if *c == '+' || *c == '-' => {
+                    num.push(*c);
+                    self.move_next();
+                }
                 _ => {}
             }
             num += &self.parse_simple_num(10);
@@ -226,7 +232,7 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
-            },
+            }
             Some('f') => {
                 self.move_next();
                 match self.parse_simple_num(10).as_str() {
@@ -237,7 +243,7 @@ impl<'a> Lexer<'a> {
                         return Err(ErrorToken::new(other.to_string(), self.line, self.col));
                     }
                 }
-            },
+            }
             Some('i') => {
                 self.move_next();
                 match self.parse_simple_num(10).as_str() {
@@ -254,11 +260,11 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
-            },
+            }
             // default postfix
-            _ => postfix_guess
+            _ => postfix_guess,
         };
- 
+
         match self.chars.peek() {
             Some(c) if c.is_ascii_alphabetic() || *c == '_' => {
                 warn!("Invalid Number ... can't have identifier tokens");
@@ -290,7 +296,7 @@ impl<'a> Lexer<'a> {
             Some(c) if Self::valid_identifier_continuer(*c) => {
                 self.chars = chars;
                 false
-            },
+            }
             _ => {
                 self.col += to.len();
                 true
@@ -325,7 +331,7 @@ impl Token {
             TokenKind::BitAnd => true,
             TokenKind::Add => true,
             TokenKind::Sub => true,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -335,7 +341,7 @@ impl ErrorToken {
         ErrorToken {
             text: text,
             line: line,
-            col: col
+            col: col,
         }
     }
 
@@ -349,12 +355,12 @@ impl<'a> Iterator for Lexer<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         /*
-          This function is quite large but is quite readable
-          so I'm going to keep it this way.
+         This function is quite large but is quite readable
+         so I'm going to keep it this way.
 
-          We could construct a trie and solve it that way
-          but it'll just be less readable (I've experimented)
-         */
+         We could construct a trie and solve it that way
+         but it'll just be less readable (I've experimented)
+        */
 
         let line = self.line;
         let col = self.col;
@@ -365,48 +371,83 @@ impl<'a> Iterator for Lexer<'a> {
         let kind = match self.next() {
             Some('~') => TokenKind::BitNot,
             Some('+') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::AddAssign },
-                _ => TokenKind::Add
-            }
+                Some('=') => {
+                    self.next();
+                    TokenKind::AddAssign
+                }
+                _ => TokenKind::Add,
+            },
             Some('-') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::SubAssign },
-                Some('>') => { self.next(); TokenKind::Arrow },
+                Some('=') => {
+                    self.next();
+                    TokenKind::SubAssign
+                }
+                Some('>') => {
+                    self.next();
+                    TokenKind::Arrow
+                }
                 Some('-') if self.matches("--") => TokenKind::Uninitialised,
-                _ => TokenKind::Sub
-            }
+                _ => TokenKind::Sub,
+            },
             Some('*') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::MulAssign },
-                _ => TokenKind::Asterix
-            }
+                Some('=') => {
+                    self.next();
+                    TokenKind::MulAssign
+                }
+                _ => TokenKind::Asterix,
+            },
             Some('/') => match self.peek() {
                 Some('/') => {
                     // comment skip till newline
                     // @HACK: Order has to be this way else it'll read one extra line
                     let start = self.line;
-                    while self.peek().is_some() && start == self.line { self.move_next(); }
-                    return Iterator::next(self)
-                },
-                Some('=') => { self.next(); TokenKind::DivAssign },
-                _ => TokenKind::Div
-            }
+                    while self.peek().is_some() && start == self.line {
+                        self.move_next();
+                    }
+                    return Iterator::next(self);
+                }
+                Some('=') => {
+                    self.next();
+                    TokenKind::DivAssign
+                }
+                _ => TokenKind::Div,
+            },
             Some('%') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::ModAssign },
-                _ => TokenKind::Mod
-            }
+                Some('=') => {
+                    self.next();
+                    TokenKind::ModAssign
+                }
+                _ => TokenKind::Mod,
+            },
             Some('^') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::BitXorAssign },
-                _ => TokenKind::BitXor
-            }
+                Some('=') => {
+                    self.next();
+                    TokenKind::BitXorAssign
+                }
+                _ => TokenKind::BitXor,
+            },
             Some('|') => match self.peek() {
-                Some('|') => { self.next(); TokenKind::BoolOr },
-                Some('=') => { self.next(); TokenKind::BitOrAssign },
-                _ => TokenKind::BitOr
-            }
+                Some('|') => {
+                    self.next();
+                    TokenKind::BoolOr
+                }
+                Some('=') => {
+                    self.next();
+                    TokenKind::BitOrAssign
+                }
+                _ => TokenKind::BitOr,
+            },
             Some('&') => match self.peek() {
-                Some('&') => { self.next(); TokenKind::BoolAnd },
-                Some('=') => { self.next(); TokenKind::BitAndAssign },
-                _ => TokenKind::BitAnd
-            }
+                Some('&') => {
+                    self.next();
+                    TokenKind::BoolAnd
+                }
+                Some('=') => {
+                    self.next();
+                    TokenKind::BitAndAssign
+                }
+                _ => TokenKind::BitAnd,
+            },
             Some('\\') => TokenKind::Lambda,
             Some(':') => TokenKind::Colon,
             Some(';') => TokenKind::SemiColon,
@@ -419,28 +460,55 @@ impl<'a> Iterator for Lexer<'a> {
             Some('.') => TokenKind::Period,
             Some(',') => TokenKind::Comma,
             Some('<') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::LessEqual },
-                Some('<') => { self.next(); match self.peek() {
-                    Some('=') => { self.next(); TokenKind::LShiftAssign },
-                    _ => TokenKind::LShift
-                }},
+                Some('=') => {
+                    self.next();
+                    TokenKind::LessEqual
+                }
+                Some('<') => {
+                    self.next();
+                    match self.peek() {
+                        Some('=') => {
+                            self.next();
+                            TokenKind::LShiftAssign
+                        }
+                        _ => TokenKind::LShift,
+                    }
+                }
                 _ => TokenKind::LAngle,
             },
             Some('>') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::GreaterEqual },
-                Some('>') => { self.next(); match self.peek() {
-                    Some('=') => { self.next(); TokenKind::RShiftAssign },
-                    _ => TokenKind::RShift
-                }},
+                Some('=') => {
+                    self.next();
+                    TokenKind::GreaterEqual
+                }
+                Some('>') => {
+                    self.next();
+                    match self.peek() {
+                        Some('=') => {
+                            self.next();
+                            TokenKind::RShiftAssign
+                        }
+                        _ => TokenKind::RShift,
+                    }
+                }
                 _ => TokenKind::RAngle,
             },
             Some('!') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::NotEqual },
+                Some('=') => {
+                    self.next();
+                    TokenKind::NotEqual
+                }
                 _ => TokenKind::Not,
             },
             Some('=') => match self.peek() {
-                Some('=') => { self.next(); TokenKind::Equal },
-                Some('>') => { self.next(); TokenKind::FatArrow },
+                Some('=') => {
+                    self.next();
+                    TokenKind::Equal
+                }
+                Some('>') => {
+                    self.next();
+                    TokenKind::FatArrow
+                }
                 _ => TokenKind::Assign,
             },
             Some('f') if self.matches("alse") => TokenKind::Bool(false),
@@ -467,7 +535,10 @@ impl<'a> Iterator for Lexer<'a> {
                 let mut string = String::new();
                 loop {
                     match self.chars.peek() {
-                        Some('"') => { self.move_next(); break; },
+                        Some('"') => {
+                            self.move_next();
+                            break;
+                        }
                         Some('\\') => {
                             self.move_next();
                             string.push(match self.chars.peek() {
@@ -478,7 +549,9 @@ impl<'a> Iterator for Lexer<'a> {
                                 Some('\'') => '\'',
                                 Some('"') => '"',
                                 // TODO: Unicode
-                                _ => return Some(Err(ErrorToken::new(string, self.line, self.col)))
+                                _ => {
+                                    return Some(Err(ErrorToken::new(string, self.line, self.col)))
+                                }
                             });
                             self.move_next();
                         }
@@ -486,17 +559,17 @@ impl<'a> Iterator for Lexer<'a> {
                             string.push(*c);
                             self.move_next();
                         }
-                        None => return Some(Err(ErrorToken::new(string, self.line, self.col)))
+                        None => return Some(Err(ErrorToken::new(string, self.line, self.col))),
                     }
                 }
                 TokenKind::Str(string)
             }
             Some('\'') => {
                 panic!("TODO: Handle characters.  I'm too lazy todo them");
-            },
+            }
             Some(c) if c.is_digit(10) => match self.parse_num(c) {
                 Err(e) => return Some(Err(e)),
-                Ok(tok) => tok
+                Ok(tok) => tok,
             },
 
             // TODO: C supports unicode identifiers so we should
@@ -508,18 +581,26 @@ impl<'a> Iterator for Lexer<'a> {
                         Some(c) if Self::valid_identifier_continuer(*c) => {
                             id.push(*c);
                             self.move_next();
-                        },
+                        }
                         _ => break,
                     }
                 }
                 TokenKind::Ident(id)
             }
-            Some(other) => return Some(Err(ErrorToken::new(other.to_string(), self.line, self.col))),
-            None => return None
+            Some(other) => {
+                return Some(Err(ErrorToken::new(other.to_string(), self.line, self.col)))
+            }
+            None => return None,
         };
 
         let byte_offset = (start_byte_offset, self.byte_offset);
-        Some(Ok(Token::new(kind, Span { line, col, byte_offset })))
+        Some(Ok(Token::new(
+            kind,
+            Span {
+                line,
+                col,
+                byte_offset,
+            },
+        )))
     }
 }
-

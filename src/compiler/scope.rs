@@ -2,9 +2,9 @@ use crate::compiler::*;
 
 use ast::*;
 
-use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// An atomic generator for fresh variables
@@ -17,7 +17,7 @@ pub struct Scope {
     // NOTE: we can't collapse this because each defer
     //       is a sepearate scope
     // i.e. defer { i := 0; } defer { i := 2; } is 2 different i's
-    pub defer_exprs: Vec<Block>
+    pub defer_exprs: Vec<Block>,
 }
 
 pub struct ScopeStack {
@@ -33,6 +33,10 @@ impl std::fmt::Debug for Scope {
 }
 
 impl ScopeStack {
+    pub fn empty() -> ScopeStack {
+        ScopeStack::new(&Rc::new(RefCell::new(Scope::default())))
+    }
+
     pub fn new(top: &Rc<RefCell<Scope>>) -> ScopeStack {
         ScopeStack {
             top_scope: Rc::clone(&top),
@@ -43,7 +47,7 @@ impl ScopeStack {
 
     pub fn new_fresh_type() -> ParsedType {
         let id = FRESH_GENERATOR.fetch_add(1, Ordering::Relaxed);
-        ParsedType::Fresh{ id }
+        ParsedType::Fresh { id }
     }
 
     pub fn set_fresh(&mut self, id: usize, new_ty: ParsedType) -> ParsedType {
@@ -55,9 +59,9 @@ impl ScopeStack {
         let ty = outer.borrow();
         match *ty {
             // a -> a is valid and default state for fresh
-            ParsedType::Fresh{id: ref new_id} if *new_id != id => {
+            ParsedType::Fresh { id: ref new_id } if *new_id != id => {
                 self.set_fresh(*new_id, new_ty)
-            },
+            }
             _ => {
                 // this is overriding the type TypeName = i32;
                 // probably should be careful here because we could unintentionally
@@ -78,16 +82,24 @@ impl ScopeStack {
     pub fn lookup_fresh(&mut self, id: usize) -> Rc<RefCell<ParsedType>> {
         // due to Rc::new having a cost (allocation) associated with it
         // it is generated lazily
-        Rc::clone(self.fresh_type_env.entry(id)
-            .or_insert_with(|| Rc::new(RefCell::new(ParsedType::Fresh{id}))))
+        Rc::clone(
+            self.fresh_type_env
+                .entry(id)
+                .or_insert_with(|| Rc::new(RefCell::new(ParsedType::Fresh { id }))),
+        )
     }
 
     /// Precondition: scope's parent must be cur_scope
     pub fn push(&mut self, scope: &Rc<RefCell<Scope>>) {
         {
             let scope_borrow = scope.borrow();
-            if scope_borrow.parent.is_none() || !Rc::ptr_eq(&self.cur_scope, &scope_borrow.parent.as_ref().unwrap()) {
-                println!("Scope parent: {:?}\n\nCur Scope: {:?}", scope_borrow.parent, self.cur_scope);
+            if scope_borrow.parent.is_none()
+                || !Rc::ptr_eq(&self.cur_scope, &scope_borrow.parent.as_ref().unwrap())
+            {
+                println!(
+                    "Scope parent: {:?}\n\nCur Scope: {:?}",
+                    scope_borrow.parent, self.cur_scope
+                );
                 panic!("Precondition of push not fulfilled pushed scope's parent must be current scope");
             }
         }
@@ -106,16 +118,20 @@ impl ScopeStack {
         let scope = Scope {
             parent: Some(Rc::clone(&self.cur_scope)),
             var_env: HashMap::default(),
-            defer_exprs: vec![]
+            defer_exprs: vec![],
         };
-        
+
         self.cur_scope = Rc::new(RefCell::new(scope));
     }
 
     pub fn pop(&mut self) -> Rc<RefCell<Scope>> {
         let copy = Rc::clone(&self.cur_scope);
-        self.cur_scope = Rc::clone(copy.borrow_mut().parent.as_ref()
-                                   .expect("All inner scopes must have a parent"));
+        self.cur_scope = Rc::clone(
+            copy.borrow_mut()
+                .parent
+                .as_ref()
+                .expect("All inner scopes must have a parent"),
+        );
         copy
     }
 }
@@ -125,7 +141,7 @@ impl Scope {
         if self.var_env.get(&name).is_none() {
             let ty = match var_type {
                 Some(c) => c,
-                None => ScopeStack::new_fresh_type()
+                None => ScopeStack::new_fresh_type(),
             };
             self.var_env.insert(name, Rc::new(RefCell::new(ty.clone())));
             Some(ty)
@@ -139,8 +155,8 @@ impl Scope {
             Some(ty) => Some(Rc::clone(ty)),
             None => match &self.parent {
                 Some(parent) => parent.borrow_mut().lookup_var_cond(name),
-                None => None
-            }
+                None => None,
+            },
         }
     }
 

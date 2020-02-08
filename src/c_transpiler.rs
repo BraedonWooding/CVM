@@ -2,7 +2,7 @@ use crate::compiler::*;
 use ast::*;
 
 extern crate log;
-use log::{warn};
+use log::warn;
 
 use std::collections::hash_map::HashMap;
 
@@ -27,8 +27,12 @@ bitflags! {
 
 impl Transpiler {
     pub fn new(alpha_types: bool) -> Transpiler {
-        Transpiler { depth: 0, builder: String::from(""), alpha_types,
-                     fresh_type_lookup: HashMap::default() }
+        Transpiler {
+            depth: 0,
+            builder: String::from(""),
+            alpha_types,
+            fresh_type_lookup: HashMap::default(),
+        }
     }
 
     pub fn get_output<'a>(&'a self) -> &'a str {
@@ -52,7 +56,12 @@ impl Transpiler {
 
     fn transpile_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::If{if_cond, if_block, else_if, else_block} => {
+            Statement::If {
+                if_cond,
+                if_block,
+                else_if,
+                else_block,
+            } => {
                 self.builder += "if (";
                 self.transpile_expr(&if_cond);
                 self.builder += ") ";
@@ -65,19 +74,23 @@ impl Transpiler {
                     self.transpile_block(&block);
                 }
 
-                if else_block.is_some() { self.transpile_block(&else_block.as_ref().unwrap()); }
+                if else_block.is_some() {
+                    self.transpile_block(&else_block.as_ref().unwrap());
+                }
                 self.builder += "\n";
-            },
+            }
             Statement::While(expr, block) => {
                 self.builder += "while (";
                 self.transpile_expr(&expr);
                 self.builder += ") ";
                 self.transpile_block(&block);
                 self.builder += "\n";
-            },
+            }
             Statement::For(init, cond, step, block) => {
                 self.builder += "for (";
-                if init.is_some() { self.transpile_expr(&init.as_ref().unwrap()); }
+                if init.is_some() {
+                    self.transpile_expr(&init.as_ref().unwrap());
+                }
                 self.builder += ";";
                 if cond.is_some() {
                     self.builder += " ";
@@ -91,14 +104,14 @@ impl Transpiler {
                 self.builder += ") ";
                 self.transpile_block(&block);
                 self.builder += "\n";
-            },
+            }
             Statement::Defer => {
                 // NOTE: Defers are just ignored
-            },
+            }
             Statement::Expr(expr) => {
                 self.transpile_expr(&expr);
                 self.builder += ";";
-            },
+            }
             Statement::Return(expr) => {
                 self.builder += "return ";
                 self.transpile_expr(&expr);
@@ -175,56 +188,67 @@ impl Transpiler {
 
     fn transpile_expr(&mut self, expr: &Expr) {
         match &*expr.kind {
-            ExprKind::Assign{lhs, rhs, kind} => {
+            ExprKind::Assign { lhs, rhs, kind } => {
                 self.transpile_expr(&lhs);
                 self.transpile_assignment_op(&kind);
                 self.transpile_expr(&rhs);
-            },
+            }
             ExprKind::Decl(decl) => {
                 self.transpile_decl(&decl);
                 match &decl.val {
-                    Some(Expr { kind: Spanned {
-                        inner: ExprKind::Uninitialiser, ..
-                    }, .. }) => {},
+                    Some(Expr {
+                        kind:
+                            Spanned {
+                                inner: ExprKind::Uninitialiser,
+                                ..
+                            },
+                        ..
+                    }) => {}
                     Some(expr) => {
                         self.builder += " = ";
                         self.transpile_expr(&expr);
                     }
-                    None => { self.builder += " = {0}"; }
+                    None => {
+                        self.builder += " = {0}";
+                    }
                 }
-            },
+            }
             ExprKind::New(..) => {
                 // TODO
                 self.builder += "???";
-            },
+            }
             ExprKind::Unary(kinds, expr) => {
-                for kind in kinds.as_slice() { self.transpile_unary_op(&kind); }
+                for kind in kinds.as_slice() {
+                    self.transpile_unary_op(&kind);
+                }
                 self.transpile_expr(&expr);
-            },
+            }
             ExprKind::Paren(inner) => {
                 self.builder += "(";
                 self.transpile_expr(&inner);
                 self.builder += ")";
-            },
+            }
             ExprKind::Var(id) => self.builder += &id,
             ExprKind::Member(expr, ident) => {
                 self.transpile_expr(&expr);
                 self.builder += &format!(".{}", **ident);
-            },
+            }
             ExprKind::GenFuncCall(..) => {
                 // TODO
                 self.builder += "???";
-            },
+            }
             ExprKind::FuncCall(expr, args) => {
                 self.transpile_expr(&expr);
                 self.builder += "(";
                 for (i, arg) in args.iter().enumerate() {
                     self.transpile_expr(&arg);
-                    if i < args.len() - 1 { self.builder += ", " }
+                    if i < args.len() - 1 {
+                        self.builder += ", "
+                    }
                 }
                 self.builder += ")";
-            },
-            ExprKind::Cast{to, obj, ..} => {
+            }
+            ExprKind::Cast { to, obj, .. } => {
                 // we are going to write it as (to)(obj)
                 // this will just make sure no nasty precedence exists
                 self.builder += "(";
@@ -232,28 +256,28 @@ impl Transpiler {
                 self.builder += ")(";
                 self.transpile_expr(&obj);
                 self.builder += ")";
-            },
+            }
             ExprKind::Index(obj, index) => {
                 self.transpile_expr(&obj);
                 self.builder += "[";
                 self.transpile_expr(&index);
                 self.builder += "]";
-            },
+            }
             ExprKind::Sizeof(ty, ..) => {
                 // always choose the type
                 self.builder += "sizeof(";
                 self.transpile_type(&ty, TypeOpts::empty());
                 self.builder += ")";
-            },
+            }
             ExprKind::Binop(lhs, op, rhs) => {
                 self.transpile_expr(&lhs);
                 self.transpile_binop_op(&op);
                 self.transpile_expr(&rhs);
-            },
-            ExprKind::Ternary{..} => {
+            }
+            ExprKind::Ternary { .. } => {
                 // TODO
                 self.builder += "???";
-            },
+            }
             ExprKind::Constant(val) => {
                 match val {
                     ConstantKind::Int32(n) => self.builder += &format!("{}", n),
@@ -262,22 +286,22 @@ impl Transpiler {
                         self.builder += "\"";
                         self.builder += &string.escape_default().to_string();
                         self.builder += "\"";
-                    },
+                    }
                     ConstantKind::Char(c) => self.builder += &format!("{}", c),
                     ConstantKind::Null => self.builder += "NULL",
                     ConstantKind::Bool(b) => self.builder += &format!("{}", b),
                 };
-            },
+            }
             ExprKind::Let(expr) => {
                 // just perform the evaluation of expr
                 // since in C you can use assignments as conditionals
                 self.transpile_expr(&expr);
-            },
+            }
             ExprKind::Lambda(_lambda) => {
                 // this will need to be declared else where...
                 // TODO
                 self.builder += "???";
-            },
+            }
             ExprKind::Uninitialiser => {
                 // no op...
                 // NOTE: TODO (BW): we should instead do something if this doesn't exist
@@ -292,24 +316,24 @@ impl Transpiler {
     fn transpile_type_lhs(&mut self, ty: &ParsedType, opts: TypeOpts) {
         let is_func_ret = opts.contains(TypeOpts::FUNCTION_RETURN);
         match ty {
-            ParsedType::Array{inner, ..} if !is_func_ret => {
+            ParsedType::Array { inner, .. } if !is_func_ret => {
                 self.transpile_type_lhs(&inner, opts | TypeOpts::SIMPLE_VAR_SPACE);
-            },
-            ParsedType::Pointer(inner) | ParsedType::Array{inner, ..} => {
+            }
+            ParsedType::Pointer(inner) | ParsedType::Array { inner, .. } => {
                 self.transpile_type_lhs(&inner, opts | TypeOpts::SIMPLE_VAR_SPACE);
 
                 match **inner {
-                    ParsedType::Array{..} if !is_func_ret => {
+                    ParsedType::Array { .. } if !is_func_ret => {
                         // array type so we need to wrap the type in a '('
                         self.builder += "(*";
-                    },
+                    }
                     _ => {
                         // non array type we just add a '*' afterwards
                         self.builder += "*";
                     }
                 }
-            },
-            ParsedType::Var{id, gen_args} => {
+            }
+            ParsedType::Var { id, gen_args } => {
                 // NOTE: Ignoring gen args for now..
                 if gen_args.len() > 0 {
                     warn!("Generic args on structs aren't supported for C transpilation yet...");
@@ -318,23 +342,25 @@ impl Transpiler {
                 if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
                     self.builder += " ";
                 }
-            },
-            ParsedType::Func{ret, ..} => {
+            }
+            ParsedType::Func { ret, .. } => {
                 let opts = opts | TypeOpts::SIMPLE_VAR_SPACE | TypeOpts::FUNCTION_RETURN;
                 self.transpile_type_lhs(&ret, opts);
                 self.builder += &format!("(*");
-            },
-            ParsedType::Fresh{id} => {
+            }
+            ParsedType::Fresh { id } => {
                 let use_alpha = self.alpha_types;
                 let count = self.fresh_type_lookup.len();
-                let cpy = self.fresh_type_lookup.entry(*id)
+                let cpy = self
+                    .fresh_type_lookup
+                    .entry(*id)
                     .or_insert_with(|| Self::generate_fresh(use_alpha, count));
                 self.builder.push_str(cpy);
 
                 if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
                     self.builder += " ";
                 }
-            },
+            }
             ParsedType::Unknown => {
                 self.builder += "???";
                 if opts.contains(TypeOpts::SIMPLE_VAR_SPACE) {
@@ -348,16 +374,7 @@ impl Transpiler {
         if alpha_types {
             // generate type name as a, b, c, ..., aa, ..., abc
             // and so on...
-            let mut text = String::new();
-            let mut num = id;
-            loop {
-                let c = std::char::from_u32((num % 26) as u32 + b'a' as u32).unwrap();
-                num /= 26;
-                text.insert(0, c);
-                if num == 0 { break; }
-                num -= 1;
-            }
-            text
+            fresh_id_to_string(id)
         } else {
             // most compilers support '$' as an identifier token
             // but this isn't why it is used here, it's used here
@@ -377,26 +394,31 @@ impl Transpiler {
     fn transpile_type_rhs(&mut self, ty: &ParsedType, opts: TypeOpts) {
         let is_func_ret = opts.contains(TypeOpts::FUNCTION_RETURN);
         match ty {
-            ParsedType::Array{inner, len} if !is_func_ret => {
+            ParsedType::Array { inner, len } if !is_func_ret => {
                 self.builder += "[";
                 self.transpile_expr(len);
                 self.builder += "]";
                 self.transpile_type_rhs(&inner, opts);
                 // just chuck the []
-            },
-            ParsedType::Pointer(inner) | ParsedType::Array{inner, ..} => {
-                if let ParsedType::Array{..} = **inner {
-                    if !is_func_ret { self.builder += ")"; }
+            }
+            ParsedType::Pointer(inner) | ParsedType::Array { inner, .. } => {
+                if let ParsedType::Array { .. } = **inner {
+                    if !is_func_ret {
+                        self.builder += ")";
+                    }
                 }
                 self.transpile_type_rhs(&inner, opts);
-            },
-            ParsedType::Var{..} | ParsedType::Fresh{..} | ParsedType::Unknown => { /* no op */ },
-            ParsedType::Func{args, ret, ..} => {
+            }
+            ParsedType::Var { .. } | ParsedType::Fresh { .. } | ParsedType::Unknown => { /* no op */
+            }
+            ParsedType::Func { args, ret, .. } => {
                 self.builder += ")(";
                 if !args.is_empty() {
                     for (i, arg) in args.iter().enumerate() {
                         self.transpile_type(&arg, opts & !TypeOpts::SIMPLE_VAR_SPACE);
-                        if i < args.len() - 1 { self.builder += ", "; }
+                        if i < args.len() - 1 {
+                            self.builder += ", ";
+                        }
                     }
                 } else {
                     self.builder += "void";
