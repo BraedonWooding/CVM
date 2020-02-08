@@ -1,6 +1,7 @@
-use crate::compiler::*;
-use crate::logger::*;
+use crate::*;
 
+use compiler::*;
+use logger::*;
 use ast::*;
 use lexer::*;
 use scope::*;
@@ -1013,7 +1014,7 @@ impl<'a> Parser<'a> {
         let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
             self.parse_type()?
         } else {
-            ScopeStack::new_fresh_type()
+            create_type!(Var "void")
         };
 
         // We instead push them here onto their scope

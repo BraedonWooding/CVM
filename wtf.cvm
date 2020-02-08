@@ -1,6 +1,12 @@
 // TODO: This should probably
 //       be given a void return type
 //       since none was defined
+
+struct List {
+    data: int,
+    next: *List,
+}
+
 fn main() -> int {
     let sum := 0;
     for i := 0; i < 10; i += 1 {
@@ -8,5 +14,10 @@ fn main() -> int {
     }
 
     j := 0;
+
+    list := new.<List> ();
+    item := list.data;
+    next := list.next;
+
     return j;
 }

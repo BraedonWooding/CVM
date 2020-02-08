@@ -10,7 +10,7 @@ use log::{info, warn};
 pub struct TypeCheck<'a> {
     stack: &'a mut ScopeStack,
     ctx: Option<ParsedType>,
-    struct_info: &'a HashMap<Ident, Struct>,
+    struct_type_info: HashMap<String, ParsedType>,
 }
 
 /*
@@ -30,27 +30,32 @@ impl<'a> TypeCheck<'a> {
         let mut checker = TypeCheck {
             stack: &mut ScopeStack::empty(),
             ctx: None,
-            struct_info: &HashMap::default(),
+            struct_type_info: HashMap::default(),
         };
         checker.unify(a, b)
     }
 
     pub fn type_check_program(program: &'a mut Program, stack: &'a mut ScopeStack) {
-        let struct_info = &program.structs;
         let mut checker = TypeCheck {
             stack,
             ctx: None,
-            struct_info,
+            struct_type_info: HashMap::default(),
         };
 
-        for value in program.structs.values() {
-            for decl in value.decls.iter() {
-                checker.type_check_decl(decl);
-            }
+        for ref mut value in program.structs.values_mut() {
+            checker.type_check_struct(value);
         }
 
-        for function in program.functions.values() {
-            checker.type_check_function(&function);
+        for ref mut function in program.functions.values_mut() {
+            checker.type_check_function(function);
+        }
+    }
+
+    fn type_check_struct(&mut self, obj: &mut Struct) {
+        for ref mut decl in obj.decls.iter_mut() {
+            self.type_check_decl(decl);
+            self.struct_type_info
+                .insert(format!("{}.{}", *obj.id, *decl.id), decl.decl_type.clone());
         }
     }
 
@@ -71,21 +76,21 @@ impl<'a> TypeCheck<'a> {
         }
     }
 
-    fn type_check_function(&mut self, func: &Function) {
+    fn type_check_function(&mut self, func: &mut Function) {
         // TODO: Maybe force args/ret to have concrete type
         let tmp = std::mem::replace(&mut self.ctx, Some(func.ret.clone()));
 
-        self.stack.push(&func.block.scope);
+        self.stack.push(&mut func.block.scope);
         self.ctx = Some(func.ret.clone());
-        self.type_check_block(&func.block);
+        self.type_check_block(&mut func.block);
         self.stack.pop();
 
         self.ctx = tmp;
     }
 
-    fn type_check_block(&mut self, block: &Block) {
-        for statement in block.statements.iter() {
-            self.type_check_statement(&statement);
+    fn type_check_block(&mut self, block: &mut Block) {
+        for ref mut statement in block.statements.iter_mut() {
+            self.type_check_statement(statement);
         }
 
         // defers get type checked after the block
@@ -94,47 +99,47 @@ impl<'a> TypeCheck<'a> {
         // much type information so it's almost always more efficient
         // to do them after.
         // Especially since you can't leak variables out of them.
-        for defer in block.scope.borrow_mut().defer_exprs.iter() {
+        for ref mut defer in block.scope.borrow_mut().defer_exprs.iter_mut() {
             self.stack.push(&defer.scope);
-            self.type_check_block(&defer);
+            self.type_check_block(defer);
             self.stack.pop();
         }
     }
 
     fn type_check_block_and_unify_and_set(
         &mut self,
-        block: &Block,
-        expr: &Expr,
+        block: &mut Block,
+        expr: &mut Expr,
         unify_with: &ParsedType,
     ) {
         self.stack.push(&block.scope);
         self.type_check_expr(expr);
-        self.unify_and_set(&expr.type_annot, unify_with);
+        self.unify_and_set(&mut expr.type_annot, unify_with);
         self.type_check_block(block);
         self.stack.pop();
     }
 
-    fn type_check_decl(&mut self, decl: &Decl) {
-        if let Some(ref val) = decl.val {
+    fn type_check_decl(&mut self, decl: &mut Decl) {
+        if let Some(ref mut val) = decl.val {
             self.type_check_expr(val);
-            self.unify_and_set(&decl.decl_type, &val.type_annot);
+            self.unify_and_set(&mut decl.decl_type, &val.type_annot);
         }
     }
 
-    fn type_check_statement(&mut self, statement: &Statement) {
+    fn type_check_statement(&mut self, statement: &mut Statement) {
         match statement {
             Statement::If {
-                ref if_cond,
-                ref if_block,
-                ref else_if,
-                ref else_block,
+                ref mut if_cond,
+                ref mut if_block,
+                ref mut else_if,
+                ref mut else_block,
             } => {
                 self.type_check_block_and_unify_and_set(
                     if_block,
                     if_cond,
                     &ParsedType::new_simple_var_type("bool"),
                 );
-                for (ref cond, ref block) in else_if.iter() {
+                for (ref mut cond, ref mut block) in else_if.iter_mut() {
                     self.type_check_block_and_unify_and_set(
                         block,
                         cond,
@@ -142,32 +147,32 @@ impl<'a> TypeCheck<'a> {
                     );
                 }
 
-                if let Some(ref block) = else_block {
+                if let Some(ref mut block) = else_block {
                     self.stack.push(&block.scope);
                     self.type_check_block(block);
                     self.stack.pop();
                 }
             }
-            Statement::While(ref cond, ref block) => {
+            Statement::While(ref mut cond, ref mut block) => {
                 self.type_check_block_and_unify_and_set(
                     block,
                     cond,
                     &ParsedType::new_simple_var_type("bool"),
                 );
             }
-            Statement::For(ref start, ref stop, ref step, ref block) => {
+            Statement::For(ref mut start, ref mut stop, ref mut step, ref mut block) => {
                 self.stack.push(&block.scope);
 
-                if let Some(ref expr) = start {
+                if let Some(ref mut expr) = start {
                     self.type_check_expr(expr);
                 }
 
-                if let Some(ref expr) = stop {
+                if let Some(ref mut expr) = stop {
                     self.type_check_expr(expr);
-                    self.unify_and_set(&expr.type_annot, &ParsedType::new_simple_var_type("bool"));
+                    self.unify_and_set(&mut expr.type_annot, &ParsedType::new_simple_var_type("bool"));
                 }
 
-                if let Some(ref expr) = step {
+                if let Some(ref mut expr) = step {
                     self.type_check_expr(expr);
                 }
 
@@ -175,12 +180,12 @@ impl<'a> TypeCheck<'a> {
 
                 self.stack.pop();
             }
-            Statement::Expr(ref inner) => self.type_check_expr(inner),
-            Statement::Return(ref inner) => {
+            Statement::Expr(ref mut inner) => self.type_check_expr(inner),
+            Statement::Return(ref mut inner) => {
                 self.type_check_expr(inner);
                 // unify with the context!!
                 if let Some(ctx) = self.ctx.clone() {
-                    self.unify_and_set(&inner.type_annot, &ctx);
+                    self.unify_and_set(&mut inner.type_annot, &ctx);
                 } else {
                     warn!("No context, this is probably a bug");
                 }
@@ -232,7 +237,7 @@ impl<'a> TypeCheck<'a> {
                 // TODO: We should probably carry location of deref
                 //       that probably should occur with unary kind
                 //       and with []
-                warn!("Can't deref type {:?}", ty);
+                warn!("Can't deref mut type {:?}", ty);
                 None
             }
         }
@@ -256,30 +261,30 @@ impl<'a> TypeCheck<'a> {
         Some(res)
     }
 
-    fn type_check_expr(&mut self, expr: &Expr) {
+    fn type_check_expr(&mut self, expr: &mut Expr) {
         // To alleviate the weird borrow checker being cranky
         // we are using this to extend the scope of variables
         // so that we can then set it to unify with as a reference
         // means we can save on a lot of clones :)
         let tmp;
-        let unify_with = match &expr.kind.inner {
+        let unify_with = match &mut expr.kind.inner {
             ExprKind::Assign {
-                ref lhs,
-                ref rhs,
-                ref kind,
+                ref mut lhs,
+                ref mut rhs,
+                ref mut kind,
             } => {
                 self.type_check_expr(lhs);
                 self.type_check_expr(rhs);
-                self.unify_and_set(&lhs.type_annot, &rhs.type_annot);
+                self.unify_and_set(&mut lhs.type_annot, &rhs.type_annot);
                 // TODO: The 'kind' won't be valid for all types
                 //       i.e. += isn't valid for a struct/enum
                 &lhs.type_annot
             }
-            ExprKind::Decl(ref decl) => {
+            ExprKind::Decl(ref mut decl) => {
                 self.type_check_decl(decl);
                 &decl.decl_type
             }
-            ExprKind::New(ref ty, ref alloc, ref init) => {
+            ExprKind::New(ref mut ty, ref mut alloc, ref mut init) => {
                 // NOTE: alloc should be unified with the
                 //       allocator type here
                 // TODO: ^^
@@ -292,7 +297,7 @@ impl<'a> TypeCheck<'a> {
                 // but we will.
                 ty
             }
-            ExprKind::Unary(ref kinds, ref inner) => {
+            ExprKind::Unary(ref mut kinds, ref mut inner) => {
                 self.type_check_expr(inner);
                 tmp = match self.type_check_unary(kinds, &inner.type_annot) {
                     Some(ty) => ty,
@@ -300,7 +305,7 @@ impl<'a> TypeCheck<'a> {
                 };
                 &tmp
             }
-            ExprKind::Paren(ref inner) => {
+            ExprKind::Paren(ref mut inner) => {
                 // easy one
                 self.type_check_expr(inner);
                 &inner.type_annot
@@ -314,25 +319,25 @@ impl<'a> TypeCheck<'a> {
                 // I could unify with itself but come on...
                 return;
             }
-            ExprKind::Member(ref inner, ref member_id) => {
+            ExprKind::Member(ref mut inner, ref mut member_id) => {
                 self.type_check_expr(inner);
 
                 // relatively complicated to make it handle all cases
                 let id_ty = self.resolve_type(&inner.type_annot);
                 if let ParsedType::Var { ref id, .. } = id_ty {
-                    match self.struct_info.get(id) {
-                        Some(obj) => match obj.find_member(member_id) {
-                            Some(member) => &member.decl_type,
-                            None => {
-                                warn!(
-                                    "No member exists for struct type {:?} with id {:?}",
-                                    id, member_id
-                                );
-                                return;
-                            }
-                        },
+                    match self
+                        .struct_type_info
+                        .get(&format!("{}.{}", **id, **member_id))
+                    {
+                        Some(member) => {
+                            tmp = member.clone();
+                            &tmp
+                        }
                         None => {
-                            warn!("No struct exists with name {:?}", id);
+                            warn!(
+                                "No struct/member exists for struct type {:?} with id {:?}",
+                                id, member_id
+                            );
                             return;
                         }
                     }
@@ -348,7 +353,7 @@ impl<'a> TypeCheck<'a> {
                 // TODO: Generic function calls
                 return;
             }
-            ExprKind::FuncCall(ref func, ref exprs) => {
+            ExprKind::FuncCall(ref mut func, ref mut exprs) => {
                 // we need the function type in a nice format
                 self.type_check_expr(func);
                 let fn_type = self.resolve_type(&func.type_annot);
@@ -360,8 +365,8 @@ impl<'a> TypeCheck<'a> {
                         return;
                     }
                     for i in 0..exprs.len() {
-                        self.type_check_expr(&exprs[i]);
-                        self.unify_and_set(&exprs[i].type_annot, &args[i]);
+                        self.type_check_expr(&mut exprs[i]);
+                        self.unify_and_set(&mut exprs[i].type_annot, &args[i]);
                     }
                     tmp = *ret;
                     &tmp
@@ -375,14 +380,14 @@ impl<'a> TypeCheck<'a> {
             }
             ExprKind::Cast {
                 ref to,
-                ref from,
-                ref obj,
+                ref mut from,
+                ref mut obj,
             } => {
-                self.type_check_expr(&obj);
-                self.unify_and_set(&obj.type_annot, from);
+                self.type_check_expr(obj);
+                self.unify_and_set(&mut obj.type_annot, from);
                 &to
             }
-            ExprKind::Index(ref expr, ref index) => {
+            ExprKind::Index(ref mut expr, ref mut index) => {
                 self.type_check_expr(expr);
                 self.type_check_expr(index);
 
@@ -393,28 +398,28 @@ impl<'a> TypeCheck<'a> {
                 };
                 &tmp
             }
-            ExprKind::Sizeof(ref ty, ref expr) => {
-                if let Some(ref expr) = expr {
+            ExprKind::Sizeof(ref mut ty, ref mut expr) => {
+                if let Some(ref mut expr) = expr {
                     self.type_check_expr(expr);
-                    self.unify_and_set(&expr.type_annot, ty);
+                    self.unify_and_set(&mut expr.type_annot, ty);
                 }
                 tmp = ParsedType::new_simple_var_type("size_t");
                 &tmp
             }
-            ExprKind::Binop(ref lhs, ref op, ref rhs) => {
+            ExprKind::Binop(ref mut lhs, ref mut op, ref mut rhs) => {
                 self.type_check_expr(lhs);
                 self.type_check_expr(rhs);
                 // TODO: This unification should go away
                 //       since the types don't have to unify
                 //       they just have to be upcastable
-                self.unify_and_set(&lhs.type_annot, &rhs.type_annot);
+                self.unify_and_set(&mut lhs.type_annot, &rhs.type_annot);
                 self.type_check_arithmetic(&lhs.type_annot, &rhs.type_annot);
                 &lhs.type_annot
             }
             ExprKind::Ternary {
-                ref cond,
-                ref if_true,
-                ref if_false,
+                ref mut cond,
+                ref mut if_true,
+                ref mut if_false,
             } => {
                 // TODO:
                 return;
@@ -424,7 +429,7 @@ impl<'a> TypeCheck<'a> {
                 // and already concreted in terms of type and value
                 return;
             }
-            ExprKind::Let(ref inner) => {
+            ExprKind::Let(ref mut inner) => {
                 self.type_check_expr(inner);
                 &inner.type_annot
             }
@@ -437,7 +442,8 @@ impl<'a> TypeCheck<'a> {
                 return;
             }
         };
-        self.unify_and_set(&expr.type_annot, unify_with);
+
+        self.unify_and_set(&mut expr.type_annot, unify_with);
     }
 
     /* == Unification Algorithm == */
@@ -477,19 +483,23 @@ impl<'a> TypeCheck<'a> {
     ///       handling your types like a := b
     ///       if in some unification you do b := a
     ///       it could end up looping in weird cases
-    fn set_type(&mut self, id: usize, other: ParsedType) {
+    fn set_type(&mut self, id: usize, mut other: ParsedType) {
         // a := b
         let old = self.stack.set_fresh(id, other.clone());
         // now we have to make sure that we aren't just removing a concreted type
         match old {
             ParsedType::Fresh { .. } => { /* No unification required */ }
-            old => self.unify_and_set(&other, &old),
+            old => self.unify_and_set(&mut other, &old),
         }
     }
 
-    fn unify_and_set<'b>(&mut self, a: &'b ParsedType, b: &'b ParsedType) {
-        for item in self.unify(a, b) {
-            self.set_type(item.0, item.1);
+    fn unify_and_set<'b>(&mut self, a: &'b mut ParsedType, b: &'b ParsedType) {
+        if let ParsedType::Unknown = a {
+            *a = b.clone();
+        } else {
+            for item in self.unify(a, b) {
+                self.set_type(item.0, item.1);
+            }
         }
     }
 
@@ -526,7 +536,6 @@ impl<'a> TypeCheck<'a> {
                     warn!("Occurs check failed, infinite type in {}", id);
                 } else {
                     // id := other
-                    warn!("Settings {:?} to {:?}", id, other);
                     ret.push((*id, (*other).clone()));
                 }
             }

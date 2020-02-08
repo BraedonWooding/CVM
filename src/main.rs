@@ -24,20 +24,24 @@ fn main() -> std::io::Result<()> {
         .author("Braedon Wooding <braedonww@gmail.com>")
         .about("C Virtual Simulation Language")
         .subcommand(SubCommand::with_name("build").args_from_usage(
-            "-o --output=[FILE] 'Sets the output file to use'
-                 -c --out-c         'Compile to C'
-                 <INPUT>            'Sets the input file to use'",
+            "
+            -o --output=[FILE] 'Sets the output file to use'
+            -c --out-c         'Compile to C'
+            <INPUT>            'Sets the input file to use'
+            ",
         ))
         .subcommand(SubCommand::with_name("dev").args_from_usage(
-            "--tokens           'Get the output of the tokenizer'
-                 --ast              'Construct and print the AST'
-                 --basic-typed-ast  'Perform first step type assignment on AST'
-                 --typed-ast        'Fully resolve all types'
-                 --bytecode         'Print out the resultant bytecode'
-                 --transpile-c      'Transpile the AST to C'
-                 --alpha-types      'Use alphabetical type names for fresh type variables'
-                 --type-tables      'Print out all the type tables'
-                 <INPUT>            'Sets the input file to use'",
+            "
+            --tokens           'Get the output of the tokenizer'
+            --ast              'Construct and print the AST'
+            --basic-typed-ast  'Perform first step type assignment on AST'
+            --typed-ast        'Fully resolve all types'
+            --bytecode         'Print out the resultant bytecode'
+            --transpile-c      'Transpile the AST to C'
+            --alpha-types      'Use alphabetical type names for fresh type variables'
+            --type-tables      'Print out all the type tables'
+            <INPUT>            'Sets the input file to use'
+            ",
         ))
         .get_matches();
 

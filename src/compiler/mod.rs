@@ -22,7 +22,9 @@ pub fn string_to_fresh_id(text: &str) -> usize {
             panic!("Invalid string to convert to fresh id!");
         }
         num += (c as usize - 'a' as usize);
-        if count == text.len() { break; }
+        if count == text.len() {
+            break;
+        }
         num += 1;
     }
 
