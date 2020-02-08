@@ -510,7 +510,7 @@ impl<'a> Parser<'a> {
                 let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
                     Box::new(self.parse_type()?)
                 } else {
-                    Box::new(ScopeStack::new_fresh_type())
+                    Box::new(create_type!(Var "void"))
                 };
 
                 ParsedType::Func{args, ret, gen_args}
@@ -682,7 +682,7 @@ impl<'a> Parser<'a> {
             TokenKind::Sizeof => {
                 // sizeof.<T>(t)
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
+                let ty = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'sizeof' takes up to 1 type argument (the type of it's object)");
                     return None;
@@ -706,7 +706,7 @@ impl<'a> Parser<'a> {
             },
             TokenKind::New => {
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
+                let ty = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'new' only takes a single type argument (type to allocate)");
                     return None;
@@ -739,8 +739,8 @@ impl<'a> Parser<'a> {
             TokenKind::Cast => {
                 // just a function ... like cast.<Out, In>(in: In)
                 let mut gen_args = self.parse_gentype_list()?;
-                let to = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
-                let from = gen_args.pop().unwrap_or_else(ScopeStack::new_fresh_type);
+                let to = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
+                let from = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'cast' takes up to 2 type arguments (to and from)");
                     return None;
@@ -934,8 +934,13 @@ impl<'a> Parser<'a> {
         // butttt the declaration always pushes a temporary fresh
         // before evaluating the value so we don't have to worry
         self.stack.push_new();
+
         // reserve ret type
         // the type checker will unify this with all the actual return types
+        // this is a valid fresh type because lambda's can't have explicit
+        // returns right now
+        // TODO: Implement explicit returns (but still keep implicit
+        //       I want x => x * x to still be valid)
         let ret = ScopeStack::new_fresh_type();
 
         let mut args = if try_expect!(self.it, TokenKind::LParen).is_some() {
@@ -987,12 +992,12 @@ impl<'a> Parser<'a> {
         // i.e. fn fib(n: usize, inner := fib) => n <= 1 ? 1 : inner(n - 1) + inner(n - 2)
         // we have to put it in the public scope as a type variable 'a'
         // then we can concrete it down better afterwards
-        // This does introduce type variable pollution so we probably want to at one point
-        // introduce a new type variable class called TempTypeVar that is not intended to last longer than
-        // a declaration so that we don't have to waste a ton of letters on functions
+        // This is a valid case of fresh types that needs to remain
         let (fresh, fresh_id) = if let ParsedType::Fresh { id } = ScopeStack::new_fresh_type() {
             (ParsedType::Fresh { id }, id)
         } else {
+            // wtf is this error???
+            // This won't happen lmao, just do a panic cast instead of this sh*t
             warn!("Internal error new_fresh_type returned a non fresh type");
             return None;
         };

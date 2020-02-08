@@ -243,6 +243,9 @@ impl<'a> TypeInfer<'a> {
                     ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char")))
                 }
                 ConstantKind::Char(..) => ParsedType::new_simple_var_type("char"),
+                // The only valid case for a fresh type CURRENTLY
+                // TODO: Add 'null literal' as a type that is similar to how
+                //       int literal and float literal will behave (i.e. implicit cast)
                 ConstantKind::Null => ParsedType::Pointer(Box::new(ScopeStack::new_fresh_type())),
                 ConstantKind::Bool(..) => ParsedType::new_simple_var_type("bool"),
             }),
@@ -258,10 +261,11 @@ impl<'a> TypeInfer<'a> {
                 // TODO: support lambdas
                 None
             }
+
             // doesn't really have a 'type' is kinda like 'null'
             // for example `x := null` is an error and so is `x := ---`
             // because both don't know what type is 'x'
-            ExprKind::Uninitialiser => Some(ScopeStack::new_fresh_type()),
+            ExprKind::Uninitialiser => Some(ParsedType::Unknown),
         };
         if let Some(ty) = ty {
             expr.type_annot = ty;

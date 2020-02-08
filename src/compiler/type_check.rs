@@ -438,7 +438,10 @@ impl<'a> TypeCheck<'a> {
                 return;
             }
             ExprKind::Uninitialiser => {
-                // ehh??? TODO: This is weird tbh
+                // Give uninit a fresh type
+                // in reality we should just ignore it's type
+                // TODO: ^^
+                expr.type_annot = ScopeStack::new_fresh_type();
                 return;
             }
         };
