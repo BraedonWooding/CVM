@@ -1,14 +1,15 @@
-#[macro_use]
 extern crate enum_as_inner;
+extern crate lazy_static;
+extern crate num;
+extern crate libc;
 
 #[macro_use]
-extern crate lazy_static;
+extern crate impls;
 
 use std::fs;
-use std::fs::File;
 
 extern crate clap;
-use clap::{App, Arg, SubCommand};
+use clap::{App, SubCommand};
 
 extern crate log;
 extern crate simple_logger;
@@ -83,7 +84,8 @@ fn main() -> std::io::Result<()> {
                 println!("== Basic Typed AST Finished ==");
             }
 
-            TypeCheck::type_check_program(&mut ast, &mut stack);
+            let table = compiler::TypeDefinitionTable::load_type_definition_table();
+            TypeCheck::type_check_program(&mut ast, &mut stack, &table);
 
             if sub_matches.is_present("typed-ast") {
                 println!("== Fully Typed AST Started ==");

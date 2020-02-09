@@ -5,6 +5,8 @@ pub mod scope;
 pub mod type_check;
 pub mod type_infer;
 
+use std::collections::HashMap;
+
 pub type Ident = Spanned<String>;
 pub type IdentList = Vec<Ident>;
 
@@ -21,7 +23,7 @@ pub fn string_to_fresh_id(text: &str) -> usize {
         if c > 'z' || c < 'a' {
             panic!("Invalid string to convert to fresh id!");
         }
-        num += (c as usize - 'a' as usize);
+        num += c as usize - 'a' as usize;
         if count == text.len() {
             break;
         }
@@ -66,6 +68,152 @@ macro_rules! create_type {
     (Func $(($($args:tt)+)),* -> ($($ret:tt)+)) => {
         ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+)), gen_args: vec![]}
     };
+}
+
+/// Represents a definition of a primative type or alias
+/// 
+/// Weird cases:
+/// - *void -> *u8, this is because *void is almost 100% a mistake in C
+///   that should have always been *u8 (there is no difference between the types
+///   except that *u8 makes the presumption of 8 bit char bit sizes)
+///   We allow *void to keep consistency with C but it isn't an actual type
+///   (void is though but that is a type with no values and is purely used
+///   to allow you to have fields that are removed in some cases).
+#[derive(Debug)]
+pub enum TypeDefinition {
+    // I think alignment has a reasonable maximum of 8 bytes
+    // but I'm just gonna be safe and do usize for now :) TODO: This is a waste
+    // fix this.
+    // Technically integral types only go to like 128 bytes
+    // so we could use a u8 as well for size...
+    Integral{align: usize, size: usize, signedness: bool},
+    FloatingPt{size: usize, align: usize},
+    /// NOTE: This may have to be an Ident later...
+    Alias(String),
+}
+
+impl TypeDefinition {
+    pub fn type_is_numeric(&self) -> bool {
+        if let TypeDefinition::Integral{..} | TypeDefinition::FloatingPt{..} = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn type_size(&self) -> usize {
+        if let TypeDefinition::Integral{size, ..} | TypeDefinition::FloatingPt{size, ..} = self {
+            *size
+        } else {
+            panic!("Non expanded alias");
+        }
+    }
+
+    pub fn type_alignment(&self) -> usize {
+        if let TypeDefinition::Integral{align, ..} | TypeDefinition::FloatingPt{align, ..} = self {
+            *align
+        } else {
+            panic!("Non expanded alias");
+        }
+    }
+
+    // Only valid on integral types
+    pub fn type_signedness(&self) -> bool {
+        if let TypeDefinition::Integral{signedness, ..} = self {
+            *signedness
+        } else {
+            panic!("Alias is not expanded or you are trying to find signedness on floating point");
+        }
+    }
+
+    pub fn type_is_integral(&self) -> bool {
+        if let TypeDefinition::Integral{..} = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn type_is_float(&self) -> bool {
+        if let TypeDefinition::FloatingPt{..} = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+pub struct TypeDefinitionTable(pub HashMap<ast::ParsedType, TypeDefinition>);
+
+impl TypeDefinitionTable {
+    fn add_integral<T: num::PrimInt>(&mut self, id: &'static str, aliases: &'static [&'static str]) {
+        let align = std::mem::align_of::<T>();
+        let size = std::mem::size_of::<T>();
+        let signedness = impls!(T: num::Signed);
+
+        self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::Integral{align, size, signedness});
+
+        for alias in aliases {
+            self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::Alias(alias.to_string()));
+        }
+    }
+
+    fn add_float<T: num::Float>(&mut self, id: &'static str, aliases: &'static [&'static str]) {
+        let align = std::mem::align_of::<T>();
+        let size = std::mem::size_of::<T>();
+
+        self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::FloatingPt{align, size});
+
+        for alias in aliases {
+            self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::Alias(alias.to_string()));
+        }
+    }
+
+    pub fn load_type_definition_table() -> TypeDefinitionTable {
+        let mut table = TypeDefinitionTable(HashMap::new());
+        table.add_float::<libc::c_float>("float", &["f32"]);
+        table.add_float::<libc::c_double>("double", &["f64"]);
+
+        // We allow 'signed_char' just to match (kinda) 'signed char'
+        table.add_integral::<libc::c_char>("char", &[]);
+        table.add_integral::<libc::c_schar>("schar", &["signed_char", "i8"]);
+        table.add_integral::<libc::c_uchar>("uchar", &["unsigned_char", "u8"]);
+
+        table.add_integral::<libc::c_int>("int", &["signed_int"]);
+        table.add_integral::<libc::c_long>("long", &["signed_long"]);
+        table.add_integral::<libc::c_longlong>("longlong", &["signed_long_long", "long_long"]);
+        table.add_integral::<libc::c_short>("short", &["signed_short"]);
+
+        table.add_integral::<libc::c_int>("uint", &["unsigned_int"]);
+        table.add_integral::<libc::c_long>("ulong", &["unsigned_long"]);
+        table.add_integral::<libc::c_longlong>("ulonglong", &["unsigned_long_long", "ulong_long"]);
+        table.add_integral::<libc::c_short>("ushort", &["unsigned_short"]);
+
+        table.add_integral::<libc::uintmax_t>("uintmax_t", &[]);
+        table.add_integral::<libc::intmax_t>("intmax_t", &[]);
+
+        table.add_integral::<libc::uintptr_t>("uintptr_t", &["usize"]);
+        table.add_integral::<libc::intptr_t>("intptr_t", &["isize"]);
+
+        table.add_integral::<libc::ptrdiff_t>("ptrdiff_t", &[]);
+
+        table.add_integral::<i16>("int16_t", &["i16"]);
+        table.add_integral::<i32>("int32_t", &["i32"]);
+        table.add_integral::<i64>("int64_t", &["i64"]);
+        table.add_integral::<u16>("uint16_t", &["u16"]);
+        table.add_integral::<u32>("uint32_t", &["u32"]);
+        table.add_integral::<u64>("uint64_t", &["u64"]);
+
+        table
+    }
+}
+
+impl std::ops::Deref for TypeDefinitionTable {
+    type Target = HashMap<ast::ParsedType, TypeDefinition>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 #[derive(Clone, Default, Eq, PartialEq, Hash)]

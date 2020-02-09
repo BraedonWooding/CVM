@@ -11,6 +11,7 @@ pub struct TypeCheck<'a> {
     stack: &'a mut ScopeStack,
     ctx: Option<ParsedType>,
     struct_type_info: HashMap<String, ParsedType>,
+    type_definition_table: &'a TypeDefinitionTable,
 }
 
 /*
@@ -31,15 +32,17 @@ impl<'a> TypeCheck<'a> {
             stack: &mut ScopeStack::empty(),
             ctx: None,
             struct_type_info: HashMap::default(),
+            type_definition_table: &TypeDefinitionTable::load_type_definition_table(),
         };
         checker.unify(a, b)
     }
 
-    pub fn type_check_program(program: &'a mut Program, stack: &'a mut ScopeStack) {
+    pub fn type_check_program(program: &'a mut Program, stack: &'a mut ScopeStack, type_definition_table: &'a TypeDefinitionTable) {
         let mut checker = TypeCheck {
             stack,
             ctx: None,
             struct_type_info: HashMap::default(),
+            type_definition_table
         };
 
         for ref mut value in program.structs.values_mut() {
@@ -169,7 +172,10 @@ impl<'a> TypeCheck<'a> {
 
                 if let Some(ref mut expr) = stop {
                     self.type_check_expr(expr);
-                    self.unify_and_set(&mut expr.type_annot, &ParsedType::new_simple_var_type("bool"));
+                    self.unify_and_set(
+                        &mut expr.type_annot,
+                        &ParsedType::new_simple_var_type("bool"),
+                    );
                 }
 
                 if let Some(ref mut expr) = step {
@@ -192,32 +198,6 @@ impl<'a> TypeCheck<'a> {
             }
             Statement::Defer => {}
         }
-    }
-
-    // TODO: Move these somewhere else
-    fn type_is_numeric(&self, ty: &ParsedType) -> bool {
-        false
-    }
-
-    fn type_size(&self, ty: &ParsedType) -> usize {
-        0
-    }
-
-    fn type_alignment(&self, ty: &ParsedType) -> usize {
-        0
-    }
-
-    // Only valid on integral types
-    fn type_signedness(&self, ty: &ParsedType) -> bool {
-        false
-    }
-
-    fn type_is_integral(&self, ty: &ParsedType) -> bool {
-        false
-    }
-
-    fn type_is_float(&self, ty: &ParsedType) -> bool {
-        false
     }
 
     fn type_check_arithmetic(&self, left: &ParsedType, right: &ParsedType) {

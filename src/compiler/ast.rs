@@ -253,6 +253,33 @@ pub enum ParsedType {
     },
 }
 
+impl std::hash::Hash for ParsedType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            ParsedType::Unknown => panic!("Can't hash an unknown type"),
+            ParsedType::Array{inner, ..} | ParsedType::Pointer(inner) => {
+                inner.hash(state);
+            },
+            ParsedType::Var{id, ..} => (*id).hash(state),
+            ParsedType::Fresh{id} => id.hash(state),
+            ParsedType::Func{args, ret, ..} => {
+                args.hash(state);
+                ret.hash(state);
+            }
+        }
+    }
+}
+
+/// This isn't entirely true...
+/// i.e. Unknown =/= Unknown in any context (similar to how f32/f64 can't
+/// be hashed in Rust) however to property implement type definitions
+/// it would be nice to have this... for now
+/// 
+/// TODO: We shouldn't do this... instead we should just handle the special
+///       cases as special cases i.e. handle *void as *u8 specially
+///       (just use idents for typedefs tbh...)
+impl std::cmp::Eq for ParsedType {}
+
 impl std::cmp::PartialEq for ParsedType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {

@@ -4,6 +4,12 @@ extern crate enum_as_inner;
 #[macro_use]
 extern crate bitflags;
 
+extern crate num;
+extern crate libc;
+
+#[macro_use]
+extern crate impls;
+
 pub mod c_transpiler;
 pub mod compiler;
 mod logger;

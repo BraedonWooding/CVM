@@ -72,6 +72,7 @@ The table is indexed a little weirdly, basically it is ParsedType -> TypeDefinit
   - Technically this really should never happen so it currently produces a warning as well
 - ParsedType::Func hashes each of its args and ret and combines them
   - Highly expensive hash, never use this please, produces a warning upon use.
+    - Hash is expensive since it needs to hash and combine every single argument type and the return type!
 - ParsedType::Unknown produces an error
 
 ## Speeding up the interpreter

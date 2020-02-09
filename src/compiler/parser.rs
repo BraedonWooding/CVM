@@ -1,9 +1,9 @@
 use crate::*;
 
-use compiler::*;
-use logger::*;
 use ast::*;
+use compiler::*;
 use lexer::*;
+use logger::*;
 use scope::*;
 
 use std::cell::RefCell;
@@ -682,7 +682,7 @@ impl<'a> Parser<'a> {
             TokenKind::Sizeof => {
                 // sizeof.<T>(t)
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
+                let ty = gen_args.pop().unwrap_or(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'sizeof' takes up to 1 type argument (the type of it's object)");
                     return None;
@@ -706,7 +706,7 @@ impl<'a> Parser<'a> {
             },
             TokenKind::New => {
                 let mut gen_args = self.parse_gentype_list()?;
-                let ty = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
+                let ty = gen_args.pop().unwrap_or(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'new' only takes a single type argument (type to allocate)");
                     return None;
@@ -739,8 +739,8 @@ impl<'a> Parser<'a> {
             TokenKind::Cast => {
                 // just a function ... like cast.<Out, In>(in: In)
                 let mut gen_args = self.parse_gentype_list()?;
-                let to = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
-                let from = gen_args.pop().unwrap_or_else(ParsedType::Unknown);
+                let to = gen_args.pop().unwrap_or(ParsedType::Unknown);
+                let from = gen_args.pop().unwrap_or(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'cast' takes up to 2 type arguments (to and from)");
                     return None;
