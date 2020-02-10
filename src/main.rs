@@ -11,7 +11,6 @@ use clap::{App, SubCommand};
 extern crate log;
 extern crate simple_logger;
 
-#[macro_use]
 extern crate cvm_lib;
 use cvm_lib::*;
 

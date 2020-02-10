@@ -499,12 +499,6 @@ impl<'a> Parser<'a> {
                 ParsedType::Var{id: tok.transform(|x| x.into_ident().unwrap()), gen_args}
             },
             TokenKind::Function => {
-                let gen_args = if try_expect!(self.it, TokenKind::LAngle).is_some() {
-                    parse_list!(self, parse_id, TokenKind::Comma, TokenKind::RAngle, "'>'")
-                } else {
-                    vec![]
-                };
-
                 eat!(self.it, TokenKind::LParen, "'('");
                 let args = parse_list!(self, parse_type, TokenKind::Comma, TokenKind::RParen, "')'");
                 let ret = if try_expect!(self.it, TokenKind::Arrow).is_some() {
@@ -513,7 +507,7 @@ impl<'a> Parser<'a> {
                     Box::new(create_type!(Var "void"))
                 };
 
-                ParsedType::Func{args, ret, gen_args}
+                ParsedType::Func{args, ret}
             };
             _ => {
                 warn!("Was expecting a type but instead found (TODO: put token found here)");
@@ -1050,8 +1044,7 @@ impl<'a> Parser<'a> {
 
         let func = ParsedType::Func {
             args: arg_types,
-            ret: Box::new(ret.clone()),
-            gen_args: gen_args.clone(),
+            ret: Box::new(ret.clone())
         };
         self.stack.set_fresh(fresh_id, func);
         Some(Function {

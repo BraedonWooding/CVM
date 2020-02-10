@@ -249,8 +249,7 @@ pub enum ParsedType {
     // but we do care about the function name.
     Func {
         args: Vec<ParsedType>,
-        ret: Box<ParsedType>,
-        gen_args: Vec<Ident>,
+        ret: Box<ParsedType>
     },
 }
 

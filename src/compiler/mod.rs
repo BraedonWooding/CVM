@@ -50,16 +50,16 @@ pub fn fresh_id_to_string(id: usize) -> String {
 
 #[macro_export]
 macro_rules! create_type {
-    (Var $id:tt $([ $(($($inner: tt)*)),* ])?) => {
+    (Var $id:tt $(< $(($($inner: tt)*)),* >)?) => {
         // This monstrosity allows you to optionally pass a series of gen args
-        // i.e. create_type!(Var "List" [(Fresh a)])
+        // i.e. create_type!(Var "List" <(Fresh a)>)
         ast::ParsedType::Var{id: Spanned::new($id.to_string(), Span::default()), gen_args: vec![$($(create_type!($($inner)*)),*)?]}
     };
     (Pointer ($($inner:tt)+)) => {
         ast::ParsedType::Pointer(Box::new(create_type!($($inner) +)))
     };
     (Array [$len:expr] ($($inner:tt)+)) => {
-        compielr::ast::ParsedType::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
+        ast::ParsedType::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
     };
     // Allows (Fresh a) instead of forcing (Fresh 0)
     // just makes names a tad nicer
@@ -71,7 +71,7 @@ macro_rules! create_type {
         ast::ParsedType::Fresh { id:$id }
     };
     (Func $(($($args:tt)+)),* -> ($($ret:tt)+)) => {
-        scopeast::ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+)), gen_args: vec![]}
+        ast::ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+))}
     };
 }
 

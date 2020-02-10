@@ -32,9 +32,10 @@ macro_rules! constant {
 
 macro_rules! test_type {
     { $($type:expr => $val:expr),+ $(,)? } => {
+        let table = TypeDefinitionTable::load_type_definition_table();
         $({
             let ty = $type;
-            let mut transpiler = Transpiler::new(false);
+            let mut transpiler = Transpiler::new(false, &table);
             transpiler.transpile_type(&ty, TypeOpts::empty());
             assert_eq!(transpiler.get_output(), $val);
         });+
