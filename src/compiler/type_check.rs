@@ -1,5 +1,6 @@
-use crate::compiler::*;
+use crate::*;
 use ast::*;
+use compiler::*;
 use scope::*;
 
 use std::collections::HashMap;
@@ -37,12 +38,16 @@ impl<'a> TypeCheck<'a> {
         checker.unify(a, b)
     }
 
-    pub fn type_check_program(program: &'a mut Program, stack: &'a mut ScopeStack, type_definition_table: &'a TypeDefinitionTable) {
+    pub fn type_check_program(
+        program: &'a mut Program,
+        stack: &'a mut ScopeStack,
+        type_definition_table: &'a TypeDefinitionTable,
+    ) {
         let mut checker = TypeCheck {
             stack,
             ctx: None,
             struct_type_info: HashMap::default(),
-            type_definition_table
+            type_definition_table,
         };
 
         for ref mut value in program.structs.values_mut() {
@@ -51,6 +56,15 @@ impl<'a> TypeCheck<'a> {
 
         for ref mut function in program.functions.values_mut() {
             checker.type_check_function(function);
+        }
+    }
+
+    fn get_typedef(&self, ty: &ParsedType) -> Option<&TypeDefinition> {
+        let ty = self.type_definition_table.get(ty);
+        if let Some(TypeDefinition::Alias(id)) = ty {
+            self.get_typedef(&create_type!(Var id))
+        } else {
+            ty
         }
     }
 
@@ -75,6 +89,22 @@ impl<'a> TypeCheck<'a> {
                 }
                 Some(other) => self.resolve_type(&other.borrow()),
             },
+            ParsedType::Var {
+                ref id,
+                ref gen_args,
+            } => {
+                // when we resolve a type we want to remove any typedefs
+                let inner =
+                    if let Some(TypeDefinition::Alias(ty)) = self.type_definition_table.get(ty) {
+                        ty.clone()
+                    } else {
+                        id.inner.clone()
+                    };
+                ParsedType::Var {
+                    id: Spanned::new(inner, id.span.clone()),
+                    gen_args: gen_args.clone(),
+                }
+            }
             other => other.clone(),
         }
     }
@@ -140,14 +170,10 @@ impl<'a> TypeCheck<'a> {
                 self.type_check_block_and_unify_and_set(
                     if_block,
                     if_cond,
-                    &ParsedType::new_simple_var_type("bool"),
+                    &create_type!(Var "bool"),
                 );
                 for (ref mut cond, ref mut block) in else_if.iter_mut() {
-                    self.type_check_block_and_unify_and_set(
-                        block,
-                        cond,
-                        &ParsedType::new_simple_var_type("bool"),
-                    );
+                    self.type_check_block_and_unify_and_set(block, cond, &create_type!(Var "bool"));
                 }
 
                 if let Some(ref mut block) = else_block {
@@ -157,11 +183,7 @@ impl<'a> TypeCheck<'a> {
                 }
             }
             Statement::While(ref mut cond, ref mut block) => {
-                self.type_check_block_and_unify_and_set(
-                    block,
-                    cond,
-                    &ParsedType::new_simple_var_type("bool"),
-                );
+                self.type_check_block_and_unify_and_set(block, cond, &create_type!(Var "bool"));
             }
             Statement::For(ref mut start, ref mut stop, ref mut step, ref mut block) => {
                 self.stack.push(&block.scope);
@@ -172,10 +194,7 @@ impl<'a> TypeCheck<'a> {
 
                 if let Some(ref mut expr) = stop {
                     self.type_check_expr(expr);
-                    self.unify_and_set(
-                        &mut expr.type_annot,
-                        &ParsedType::new_simple_var_type("bool"),
-                    );
+                    self.unify_and_set(&mut expr.type_annot, &create_type!(Var "bool"));
                 }
 
                 if let Some(ref mut expr) = step {
@@ -200,13 +219,78 @@ impl<'a> TypeCheck<'a> {
         }
     }
 
-    fn type_check_arithmetic(&self, left: &ParsedType, right: &ParsedType) {
+    /// Type check an arithmetic expression and return the resultant type
+    /// i.e. u8 + i8 is an error
+    ///      u8 + u16 => u16
+    ///      i16 + i64 => i64
+    ///      f32 + i64 is an error
+    ///      f32 + f64 => f64
+    fn type_check_arithmetic(
+        &self,
+        left: &ParsedType,
+        right: &ParsedType,
+        op: &BinopKind,
+    ) -> ParsedType {
         // In C all arithmetic is defined such that if one operator is allowed
         // all are technically supported.
         // i.e. no '+' operator for strings (but you can add the pointers)
         // TODO: If we ever support operator overloading clearly this will have
         //       to change...
         // NOTE: we currently don't support you doing arithmetic
+        let left_def = self.get_typedef(left);
+        let right_def = self.get_typedef(right);
+
+        // TODO: Support pointer arithmetic
+
+        match (left_def, right_def) {
+            (
+                Some(TypeDefinition::Integral {
+                    size: left_size,
+                    signedness: left_signedness,
+                    ..
+                }),
+                Some(TypeDefinition::Integral {
+                    size: right_size,
+                    signedness: right_signedness,
+                    ..
+                }),
+            ) => {
+                if left_signedness == right_signedness {
+                    if left_size > right_size {
+                        left.clone()
+                    } else {
+                        right.clone()
+                    }
+                } else {
+                    warn!("Can't perform an operation on two objects differing in signedness, perform a cast.\n
+                           Operation {:?} is not valid on types {:?} and {:?}", op, left, right);
+                    ParsedType::Unknown
+                }
+            }
+            (
+                Some(TypeDefinition::FloatingPt {
+                    size: left_size, ..
+                }),
+                Some(TypeDefinition::FloatingPt {
+                    size: right_size, ..
+                }),
+            ) => {
+                if left_size > right_size {
+                    left.clone()
+                } else {
+                    right.clone()
+                }
+            }
+            _ => {
+                // TODO: If one is a floating point and the other is an
+                //       integral type then it's fine
+                warn!(
+                    "Operation {:?} is not valid on types {:?} and {:?}",
+                    op, left, right
+                );
+                ParsedType::Unknown
+            }
+        }
     }
 
     fn try_deref_type(&self, ty: &ParsedType) -> Option<ParsedType> {
@@ -383,7 +467,7 @@ impl<'a> TypeCheck<'a> {
                     self.type_check_expr(expr);
                     self.unify_and_set(&mut expr.type_annot, ty);
                 }
-                tmp = ParsedType::new_simple_var_type("size_t");
+                tmp = create_type!(Var "size_t");
                 &tmp
             }
             ExprKind::Binop(ref mut lhs, ref mut op, ref mut rhs) => {
@@ -393,8 +477,8 @@ impl<'a> TypeCheck<'a> {
                 //       since the types don't have to unify
                 //       they just have to be upcastable
                 self.unify_and_set(&mut lhs.type_annot, &rhs.type_annot);
-                self.type_check_arithmetic(&lhs.type_annot, &rhs.type_annot);
-                &lhs.type_annot
+                tmp = self.type_check_arithmetic(&lhs.type_annot, &rhs.type_annot, op);
+                &tmp
             }
             ExprKind::Ternary {
                 ref mut cond,

@@ -74,7 +74,7 @@ fn<T> freeList(list: List<T>) {
 // Arrays are a little different in CVM
 // we allow you to return them but we don't allow you
 // to pretend they are pointers!  So no *char[] or anything
-fn main(argc: int, argv: **char) -> int {
+fn main(argc: int, argv: **char) -> uchar {
     list : List<int>;
 
     while let i := read(stdin) {
@@ -93,7 +93,9 @@ fn main(argc: int, argv: **char) -> int {
     // stated at the top.
     print("Original: %\nOdd Elements: %\n", list, output);
 
-    return 0;
+    x: uchar = 0;
+
+    return x;
 }
 
 fn<T, U> transform(data: *T, length: size_t, func: fn (T) -> U) -> *U {

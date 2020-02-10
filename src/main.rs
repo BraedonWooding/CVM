@@ -1,10 +1,7 @@
 extern crate enum_as_inner;
 extern crate lazy_static;
-extern crate num;
 extern crate libc;
-
-#[macro_use]
-extern crate impls;
+extern crate num;
 
 use std::fs;
 
@@ -14,6 +11,7 @@ use clap::{App, SubCommand};
 extern crate log;
 extern crate simple_logger;
 
+#[macro_use]
 extern crate cvm_lib;
 use cvm_lib::*;
 
@@ -102,7 +100,7 @@ fn main() -> std::io::Result<()> {
             if sub_matches.is_present("transpile-c") {
                 println!("== Transpilation to C Started ==");
                 let mut transpiler =
-                    c_transpiler::Transpiler::new(sub_matches.is_present("alpha-types"));
+                    c_transpiler::Transpiler::new(sub_matches.is_present("alpha-types"), &table);
                 transpiler.transpile_program(&ast);
                 let output = transpiler.get_output();
                 println!("== Transpilation to C Finished ==");

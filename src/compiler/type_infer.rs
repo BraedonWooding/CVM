@@ -1,5 +1,8 @@
-use crate::compiler::ast::*;
-use crate::compiler::scope::*;
+use crate::*;
+
+use ast::*;
+use compiler::*;
+use scope::*;
 
 extern crate log;
 use log::warn;
@@ -192,7 +195,7 @@ impl<'a> TypeInfer<'a> {
                 }
 
                 // sizeof always returns size_t
-                Some(ParsedType::new_simple_var_type("size_t"))
+                Some(create_type!(Var "size_t"))
             }
             ExprKind::Binop(ref mut lhs, op, ref mut rhs) => {
                 // We'll check they are the same type in the type check phase...
@@ -223,7 +226,7 @@ impl<'a> TypeInfer<'a> {
                     | BinopKind::LessEqual
                     | BinopKind::GreaterEqual => {
                         // will always produce a boolean
-                        ParsedType::new_simple_var_type("bool")
+                        create_type!(Var "bool")
                     }
                 })
             }
@@ -237,17 +240,15 @@ impl<'a> TypeInfer<'a> {
                 //       that is convertible to all types.
                 //       otherwise it requires ew casts / prefixes
                 // (on second thought im not sure requiring prefixes is bad)
-                ConstantKind::Int32(..) => ParsedType::new_simple_var_type("int32_t"),
-                ConstantKind::Flt64(..) => ParsedType::new_simple_var_type("double"),
-                ConstantKind::Str(..) => {
-                    ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char")))
-                }
-                ConstantKind::Char(..) => ParsedType::new_simple_var_type("char"),
+                ConstantKind::Int32(..) => create_type!(Var "int32_t"),
+                ConstantKind::Flt64(..) => create_type!(Var "double"),
+                ConstantKind::Str(..) => ParsedType::Pointer(Box::new(create_type!(Var "char"))),
+                ConstantKind::Char(..) => create_type!(Var "char"),
                 // The only valid case for a fresh type CURRENTLY
                 // TODO: Add 'null literal' as a type that is similar to how
                 //       int literal and float literal will behave (i.e. implicit cast)
                 ConstantKind::Null => ParsedType::Pointer(Box::new(ScopeStack::new_fresh_type())),
-                ConstantKind::Bool(..) => ParsedType::new_simple_var_type("bool"),
+                ConstantKind::Bool(..) => create_type!(Var "bool"),
             }),
             ExprKind::Let(ref mut inner) => {
                 self.type_infer_expr(inner);

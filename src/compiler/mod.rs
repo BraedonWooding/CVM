@@ -50,28 +50,33 @@ pub fn fresh_id_to_string(id: usize) -> String {
 
 #[macro_export]
 macro_rules! create_type {
-    (Var $id:tt) => {
-        ParsedType::new_simple_var_type($id)
+    (Var $id:tt $([ $(($($inner: tt)*)),* ])?) => {
+        // This monstrosity allows you to optionally pass a series of gen args
+        // i.e. create_type!(Var "List" [(Fresh a)])
+        ast::ParsedType::Var{id: Spanned::new($id.to_string(), Span::default()), gen_args: vec![$($(create_type!($($inner)*)),*)?]}
     };
     (Pointer ($($inner:tt)+)) => {
-        ParsedType::Pointer(Box::new(create_type!($($inner) +)))
+        ast::ParsedType::Pointer(Box::new(create_type!($($inner) +)))
     };
     (Array [$len:expr] ($($inner:tt)+)) => {
-        ParsedType::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
+        compielr::ast::ParsedType::Array{inner: Box::new(create_type!($($inner) +)), len: Box::new($len)}
     };
+    // Allows (Fresh a) instead of forcing (Fresh 0)
+    // just makes names a tad nicer
+    // converts the identifiers to integers (if purely consisting of a-z)
     (Fresh $name:ident) => {
-        ParsedType::Fresh { id:string_to_fresh_id(stringify!($name)) }
+        ast::ParsedType::Fresh { id:string_to_fresh_id(stringify!($name)) }
     };
     (Fresh $id:tt) => {
-        ParsedType::Fresh { id:$id }
+        ast::ParsedType::Fresh { id:$id }
     };
     (Func $(($($args:tt)+)),* -> ($($ret:tt)+)) => {
-        ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+)), gen_args: vec![]}
+        scopeast::ParsedType::Func{args: vec![$(create_type!($($args)+)),*], ret: Box::new(create_type!($($ret)+)), gen_args: vec![]}
     };
 }
 
 /// Represents a definition of a primative type or alias
-/// 
+///
 /// Weird cases:
 /// - *void -> *u8, this is because *void is almost 100% a mistake in C
 ///   that should have always been *u8 (there is no difference between the types
@@ -86,15 +91,24 @@ pub enum TypeDefinition {
     // fix this.
     // Technically integral types only go to like 128 bytes
     // so we could use a u8 as well for size...
-    Integral{align: usize, size: usize, signedness: bool},
-    FloatingPt{size: usize, align: usize},
+    Integral {
+        align: usize,
+        size: usize,
+        signedness: bool,
+        c_name: &'static str,
+    },
+    FloatingPt {
+        size: usize,
+        align: usize,
+        c_name: &'static str,
+    },
     /// NOTE: This may have to be an Ident later...
     Alias(String),
 }
 
 impl TypeDefinition {
     pub fn type_is_numeric(&self) -> bool {
-        if let TypeDefinition::Integral{..} | TypeDefinition::FloatingPt{..} = self {
+        if let TypeDefinition::Integral { .. } | TypeDefinition::FloatingPt { .. } = self {
             true
         } else {
             false
@@ -102,7 +116,9 @@ impl TypeDefinition {
     }
 
     pub fn type_size(&self) -> usize {
-        if let TypeDefinition::Integral{size, ..} | TypeDefinition::FloatingPt{size, ..} = self {
+        if let TypeDefinition::Integral { size, .. } | TypeDefinition::FloatingPt { size, .. } =
+            self
+        {
             *size
         } else {
             panic!("Non expanded alias");
@@ -110,7 +126,9 @@ impl TypeDefinition {
     }
 
     pub fn type_alignment(&self) -> usize {
-        if let TypeDefinition::Integral{align, ..} | TypeDefinition::FloatingPt{align, ..} = self {
+        if let TypeDefinition::Integral { align, .. } | TypeDefinition::FloatingPt { align, .. } =
+            self
+        {
             *align
         } else {
             panic!("Non expanded alias");
@@ -119,7 +137,7 @@ impl TypeDefinition {
 
     // Only valid on integral types
     pub fn type_signedness(&self) -> bool {
-        if let TypeDefinition::Integral{signedness, ..} = self {
+        if let TypeDefinition::Integral { signedness, .. } = self {
             *signedness
         } else {
             panic!("Alias is not expanded or you are trying to find signedness on floating point");
@@ -127,7 +145,7 @@ impl TypeDefinition {
     }
 
     pub fn type_is_integral(&self) -> bool {
-        if let TypeDefinition::Integral{..} = self {
+        if let TypeDefinition::Integral { .. } = self {
             true
         } else {
             false
@@ -135,7 +153,7 @@ impl TypeDefinition {
     }
 
     pub fn type_is_float(&self) -> bool {
-        if let TypeDefinition::FloatingPt{..} = self {
+        if let TypeDefinition::FloatingPt { .. } = self {
             true
         } else {
             false
@@ -146,15 +164,30 @@ impl TypeDefinition {
 pub struct TypeDefinitionTable(pub HashMap<ast::ParsedType, TypeDefinition>);
 
 impl TypeDefinitionTable {
-    fn add_integral<T: num::PrimInt>(&mut self, id: &'static str, aliases: &'static [&'static str]) {
+    fn add_integral<T: num::PrimInt>(
+        &mut self,
+        id: &'static str,
+        aliases: &'static [&'static str],
+    ) {
         let align = std::mem::align_of::<T>();
         let size = std::mem::size_of::<T>();
         let signedness = impls!(T: num::Signed);
 
-        self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::Integral{align, size, signedness});
+        self.0.insert(
+            create_type!(Var id),
+            TypeDefinition::Integral {
+                align,
+                size,
+                signedness,
+                c_name: id,
+            },
+        );
 
         for alias in aliases {
-            self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::Alias(alias.to_string()));
+            self.0.insert(
+                create_type!(Var alias),
+                TypeDefinition::Alias(id.to_string()),
+            );
         }
     }
 
@@ -162,10 +195,20 @@ impl TypeDefinitionTable {
         let align = std::mem::align_of::<T>();
         let size = std::mem::size_of::<T>();
 
-        self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::FloatingPt{align, size});
+        self.0.insert(
+            create_type!(Var id),
+            TypeDefinition::FloatingPt {
+                align,
+                size,
+                c_name: id,
+            },
+        );
 
         for alias in aliases {
-            self.0.insert(ast::ParsedType::new_simple_var_type(id), TypeDefinition::Alias(alias.to_string()));
+            self.0.insert(
+                create_type!(Var alias),
+                TypeDefinition::Alias(id.to_string()),
+            );
         }
     }
 
@@ -176,8 +219,13 @@ impl TypeDefinitionTable {
 
         // We allow 'signed_char' just to match (kinda) 'signed char'
         table.add_integral::<libc::c_char>("char", &[]);
-        table.add_integral::<libc::c_schar>("schar", &["signed_char", "i8"]);
-        table.add_integral::<libc::c_uchar>("uchar", &["unsigned_char", "u8"]);
+        // But we want to produce valid C so we ues int8_t
+        // NOTE: We could chuck in signed char here as the C name
+        //       so then when it gets used it will expand the name to have the
+        //       space but... that just feels hacky and awful
+        // TODO: Maybe add an experimental option to do ^^
+        table.add_integral::<libc::c_schar>("int8_t", &["schar", "signed_char", "i8"]);
+        table.add_integral::<libc::c_uchar>("uint8_t", &["uchar", "unsigned_char", "u8"]);
 
         table.add_integral::<libc::c_int>("int", &["signed_int"]);
         table.add_integral::<libc::c_long>("long", &["signed_long"]);
@@ -192,8 +240,15 @@ impl TypeDefinitionTable {
         table.add_integral::<libc::uintmax_t>("uintmax_t", &[]);
         table.add_integral::<libc::intmax_t>("intmax_t", &[]);
 
-        table.add_integral::<libc::uintptr_t>("uintptr_t", &["usize"]);
-        table.add_integral::<libc::intptr_t>("intptr_t", &["isize"]);
+        // NOTE: Technically this isn't correct!!
+        // TODO: Verify if we are fine with this...
+        // The reason it isn't correct is because on non linear memory model
+        // systems (i.e. pretty old systems with memory region memory)
+        // size_t may be 2 bytes (16 bit) but a uintptr_t may be 4 bytes(32 bit)
+        // because there are two regions and memory can't cross a region
+        // technically size_t is closer to uintmax_t
+        table.add_integral::<libc::uintptr_t>("uintptr_t", &["size_t", "usize"]);
+        table.add_integral::<libc::intptr_t>("intptr_t", &["ssize_t", "isize"]);
 
         table.add_integral::<libc::ptrdiff_t>("ptrdiff_t", &[]);
 

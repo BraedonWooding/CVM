@@ -1,16 +1,18 @@
-use crate::compiler::*;
+use crate::*;
 use ast::*;
+use compiler::*;
 
 extern crate log;
 use log::warn;
 
 use std::collections::hash_map::HashMap;
 
-pub struct Transpiler {
+pub struct Transpiler<'a> {
     depth: usize,
     builder: String,
     alpha_types: bool,
     fresh_type_lookup: HashMap<usize, String>,
+    type_definition_table: &'a TypeDefinitionTable,
 }
 
 bitflags! {
@@ -25,17 +27,21 @@ bitflags! {
     }
 }
 
-impl Transpiler {
-    pub fn new(alpha_types: bool) -> Transpiler {
+impl<'a> Transpiler<'a> {
+    pub fn new(
+        alpha_types: bool,
+        type_definition_table: &'a TypeDefinitionTable,
+    ) -> Transpiler<'a> {
         Transpiler {
             depth: 0,
             builder: String::from(""),
             alpha_types,
             fresh_type_lookup: HashMap::default(),
+            type_definition_table,
         }
     }
 
-    pub fn get_output<'a>(&'a self) -> &'a str {
+    pub fn get_output<'b>(&'b self) -> &'b str {
         &self.builder
     }
 
@@ -310,6 +316,22 @@ impl Transpiler {
         }
     }
 
+    fn get_raw_type(&self, ty: &ParsedType) -> ParsedType {
+        if let ParsedType::Unknown = ty {
+            return ParsedType::Unknown;
+        }
+
+        match self.type_definition_table.get(ty) {
+            Some(TypeDefinition::Alias(id)) => {
+                // ewww TODO: awful feeling clone
+                self.get_raw_type(&create_type!(Var id))
+            }
+            Some(TypeDefinition::FloatingPt { c_name, .. })
+            | Some(TypeDefinition::Integral { c_name, .. }) => create_type!(Var c_name),
+            None => ty.clone(),
+        }
+    }
+
     // just write the lhs of the type
     // i.e. for C type => int (*a3)[8]
     // it'll just write the int (*
@@ -386,6 +408,7 @@ impl Transpiler {
 
     /// Transpile a type with given opts
     pub fn transpile_type(&mut self, ty: &ParsedType, opts: TypeOpts) {
+        let ty = self.get_raw_type(ty);
         self.transpile_type_lhs(&ty, opts);
         self.transpile_type_rhs(&ty, opts);
     }
@@ -431,9 +454,10 @@ impl Transpiler {
 
     fn transpile_decl(&mut self, decl: &Decl) {
         // write it as decl_type id val
-        self.transpile_type_lhs(&decl.decl_type, TypeOpts::SIMPLE_VAR_SPACE);
+        let ty = self.get_raw_type(&decl.decl_type);
+        self.transpile_type_lhs(&ty, TypeOpts::SIMPLE_VAR_SPACE);
         self.builder += &decl.id;
-        self.transpile_type_rhs(&decl.decl_type, TypeOpts::SIMPLE_VAR_SPACE);
+        self.transpile_type_rhs(&ty, TypeOpts::SIMPLE_VAR_SPACE);
         // values are ignored... since they are just inserted
         // at the construction site!
     }

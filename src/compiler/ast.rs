@@ -7,7 +7,8 @@
   to ensure the expressions are valid we get less safety
 */
 
-use crate::compiler::*;
+use crate::*;
+use compiler::*;
 use lexer::{Postfix, Token, TokenKind};
 use scope::Scope;
 use std::cell::RefCell;
@@ -174,22 +175,22 @@ impl ConstantKind {
                         _ => panic!("Unhandled option"),
                     }),
                     match postfix {
-                        Postfix::i32 => ParsedType::new_simple_var_type("int"),
-                        Postfix::f64 => ParsedType::new_simple_var_type("double"),
+                        Postfix::i32 => create_type!(Var "int"),
+                        Postfix::f64 => create_type!(Var "double"),
                         _ => panic!("Unhandled option"),
                     },
                 )
             }
             TokenKind::Bool(val) => (
                 ExprKind::Constant(ConstantKind::Bool(val)),
-                ParsedType::new_simple_var_type("bool"),
+                create_type!(Var "bool"),
             ),
             TokenKind::Str(val) =>
             // TODO: This would benefit from our testing macro
             {
                 (
                     ExprKind::Constant(ConstantKind::Str(val)),
-                    ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("char"))),
+                    ParsedType::Pointer(Box::new(create_type!(Var "char"))),
                 )
             }
             TokenKind::Null =>
@@ -197,12 +198,12 @@ impl ConstantKind {
             {
                 (
                     ExprKind::Constant(ConstantKind::Null),
-                    ParsedType::Pointer(Box::new(ParsedType::new_simple_var_type("void"))),
+                    ParsedType::Pointer(Box::new(create_type!(Var "u8"))),
                 )
             }
             TokenKind::Character(c) => (
                 ExprKind::Constant(ConstantKind::Char(c)),
-                ParsedType::new_simple_var_type("char"),
+                create_type!(Var "char"),
             ),
             _ => panic!("Unhandled option"),
         };
@@ -257,12 +258,12 @@ impl std::hash::Hash for ParsedType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             ParsedType::Unknown => panic!("Can't hash an unknown type"),
-            ParsedType::Array{inner, ..} | ParsedType::Pointer(inner) => {
+            ParsedType::Array { inner, .. } | ParsedType::Pointer(inner) => {
                 inner.hash(state);
-            },
-            ParsedType::Var{id, ..} => (*id).hash(state),
-            ParsedType::Fresh{id} => id.hash(state),
-            ParsedType::Func{args, ret, ..} => {
+            }
+            ParsedType::Var { id, .. } => (*id).hash(state),
+            ParsedType::Fresh { id } => id.hash(state),
+            ParsedType::Func { args, ret, .. } => {
                 args.hash(state);
                 ret.hash(state);
             }
@@ -274,7 +275,7 @@ impl std::hash::Hash for ParsedType {
 /// i.e. Unknown =/= Unknown in any context (similar to how f32/f64 can't
 /// be hashed in Rust) however to property implement type definitions
 /// it would be nice to have this... for now
-/// 
+///
 /// TODO: We shouldn't do this... instead we should just handle the special
 ///       cases as special cases i.e. handle *void as *u8 specially
 ///       (just use idents for typedefs tbh...)
@@ -305,15 +306,6 @@ impl std::cmp::PartialEq for ParsedType {
             ) => ret_a == ret_b && args_a == args_b,
             // i.e. Unknown != Unknown
             _ => false,
-        }
-    }
-}
-
-impl ParsedType {
-    pub fn new_simple_var_type(id: &str) -> ParsedType {
-        ParsedType::Var {
-            id: Ident::new(id.to_string(), Span::default()),
-            gen_args: vec![],
         }
     }
 }

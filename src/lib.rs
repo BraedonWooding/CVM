@@ -4,8 +4,8 @@ extern crate enum_as_inner;
 #[macro_use]
 extern crate bitflags;
 
-extern crate num;
 extern crate libc;
+extern crate num;
 
 #[macro_use]
 extern crate impls;
