@@ -107,7 +107,7 @@ impl Expr {
         match *self.kind {
             ExprKind::Paren(..) => true,
             ExprKind::Var(..) => true,
-            ExprKind::New(..) => true,
+            ExprKind::Init(..) => true,
             ExprKind::Cast { .. } => true,
             ExprKind::FuncCall(..) => true,
             ExprKind::Index(..) => true,
@@ -134,7 +134,7 @@ pub enum ExprKind {
         kind: AssignmentKind,
     },
     Decl(Box<Decl>),
-    New(ParsedType, Option<Box<Expr>>, Vec<Initialiser>),
+    Init(ParsedType, Vec<Initialiser>),
     Unary(Vec<UnaryKind>, Box<Expr>),
     Paren(Box<Expr>),
     Var(Ident),
@@ -354,4 +354,22 @@ pub enum AssignmentKind {
     BitAndAssign,
     BitXorAssign,
     BitOrAssign,
+}
+
+impl AssignmentKind {
+    pub fn to_binop(&self) -> Option<BinopKind> {
+        match self {
+            AssignmentKind::Assign => None,
+            AssignmentKind::MulAssign => Some(BinopKind::Mul),
+            AssignmentKind::DivAssign => Some(BinopKind::Div),
+            AssignmentKind::ModAssign => Some(BinopKind::Mod),
+            AssignmentKind::AddAssign => Some(BinopKind::Add),
+            AssignmentKind::SubAssign => Some(BinopKind::Sub),
+            AssignmentKind::ShiftLeftAssign => Some(BinopKind::ShiftLeft),
+            AssignmentKind::ShiftRightAssign => Some(BinopKind::ShiftRight),
+            AssignmentKind::BitAndAssign => Some(BinopKind::BitAnd),
+            AssignmentKind::BitXorAssign => Some(BinopKind::BitXor),
+            AssignmentKind::BitOrAssign => Some(BinopKind::BitOr),
+        }
+    }
 }

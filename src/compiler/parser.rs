@@ -698,21 +698,13 @@ impl<'a> Parser<'a> {
                     kind: Spanned::new(ExprKind::Sizeof(ty, obj), tok.span)
                 }
             },
-            TokenKind::New => {
+            TokenKind::Init => {
                 let mut gen_args = self.parse_gentype_list()?;
                 let ty = gen_args.pop().unwrap_or(ParsedType::Unknown);
                 if gen_args.len() > 0 {
                     warn!("'new' only takes a single type argument (type to allocate)");
                     return None;
                 }
-
-                eat!(self.it, TokenKind::LParen, "'('");
-                let mut args = parse_list!(self, parse_conditional, TokenKind::Comma, TokenKind::RParen, "')'");
-                if args.len() > 1 {
-                    warn!("'new' only takes a single function argument (allocator)");
-                    return None;
-                }
-                let arg = args.pop().map(Box::new);
 
                 let init = if try_expect!(self.it, TokenKind::LBrace).is_some() {
                     parse_list!(self, parse_initialiser, TokenKind::Comma, TokenKind::RBrace, "'}'")
@@ -727,7 +719,7 @@ impl<'a> Parser<'a> {
                 //       when we parse a list?  (i.e. also return the span?)
                 Expr {
                     type_annot: ParsedType::Unknown,
-                    kind: Spanned::new(ExprKind::New(ty, arg, init), tok.span)
+                    kind: Spanned::new(ExprKind::Init(ty, init), tok.span)
                 }
             },
             TokenKind::Cast => {
@@ -1002,7 +994,6 @@ impl<'a> Parser<'a> {
 
         // push a new scope
         self.stack.push_new();
-
         eat!(self.it, TokenKind::LParen, "'('");
 
         // do note that unlike the function id

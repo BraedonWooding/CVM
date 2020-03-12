@@ -103,10 +103,14 @@ impl<'a> TypeInfer<'a> {
             }
             ExprKind::Decl(ref mut decl) => self.type_infer_decl(decl),
             // TODO: allocator should be of a given type
-            ExprKind::New(given_type, _allocator, _init) => {
+            ExprKind::Init(given_type, _init) => {
                 // TODO: We should verify that init
                 //       is valid...
                 //       PostHook pipeline would be nice...
+                // @NOTE: TypeCheck also wants to verify...
+                //        I think I'll just setup placeholder types
+                //        for all init exprs then just validate that they
+                //        resolve to a singular type.
                 Some(given_type.clone())
             }
             ExprKind::Unary(args, ref mut expr) => {

@@ -225,7 +225,7 @@ impl<'a> TypeCheck<'a> {
     ///      i16 + i64 => i64
     ///      f32 + i64 is an error
     ///      f32 + f64 => f64
-    fn type_check_arithmetic(
+    fn type_check_math(
         &self,
         left: &ParsedType,
         right: &ParsedType,
@@ -340,25 +340,22 @@ impl<'a> TypeCheck<'a> {
                 self.type_check_expr(lhs);
                 self.type_check_expr(rhs);
                 self.unify_and_set(&mut lhs.type_annot, &rhs.type_annot);
-                // TODO: The 'kind' won't be valid for all types
-                //       i.e. += isn't valid for a struct/enum
-                &lhs.type_annot
+                if let Some(kind) = kind.to_binop() {
+                    tmp = self.type_check_math(&lhs.type_annot, &rhs.type_annot, &kind);
+                    &tmp
+                } else {
+                    &lhs.type_annot
+                }
             }
             ExprKind::Decl(ref mut decl) => {
                 self.type_check_decl(decl);
                 &decl.decl_type
             }
-            ExprKind::New(ref mut ty, ref mut alloc, ref mut init) => {
-                // NOTE: alloc should be unified with the
-                //       allocator type here
-                // TODO: ^^
+            ExprKind::Init(ref mut ty, ref mut init) => {
                 // TODO: We should also do some type checking on init...
                 // but that'll probably have to come after this
                 // (which kinda sucks but atleast init can't
                 // determine a new type which would suck more)
-
-                // We don't even have to do a unification here...
-                // but we will.
                 ty
             }
             ExprKind::Unary(ref mut kinds, ref mut inner) => {
@@ -477,7 +474,7 @@ impl<'a> TypeCheck<'a> {
                 //       since the types don't have to unify
                 //       they just have to be upcastable
                 self.unify_and_set(&mut lhs.type_annot, &rhs.type_annot);
-                tmp = self.type_check_arithmetic(&lhs.type_annot, &rhs.type_annot, op);
+                tmp = self.type_check_math(&lhs.type_annot, &rhs.type_annot, op);
                 &tmp
             }
             ExprKind::Ternary {

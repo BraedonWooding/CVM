@@ -1,25 +1,8 @@
 extern crate log;
 use log::warn;
 
-use crate::compiler::*;
-
-// It makes the prefixes nicer to use
-#[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum Postfix {
-    u8,
-    u16,
-    u32,
-    u64,
-    i8,
-    i16,
-    i32,
-    i64,
-    f32,
-    f64,
-    usize,
-    isize,
-}
+use crate;
+use mips::*;
 
 #[derive(Debug, Clone)]
 pub struct ErrorToken {
@@ -30,16 +13,51 @@ pub struct ErrorToken {
 
 pub type Token = Spanned<TokenKind>;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    Label(Ident),
+    RegInstruction(Spanned<RegInstruction>),
+    JmpInstruction(Spanned<JmpInstruction>),
+    Macro{name: Ident, args: Vec<Ident>, body: Vec<Statement>},
+    MacroCall(Ident),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr {
+    JmpInstruction(JmpInstruction),
+    RegInstruction(RegInstruction)
+}
+
+pub enum JmpInstruction {
+
+}
+
+pub struct RegInstruction {
+    
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Atom {
+    Str(String),
+    // TODO: When involving SPIM this can be larger
+    Int(i16),
+    // Characters in MIPS are a single byte
+    Char(u8),
+    Float(f64),
+    MacroArg(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Directives {
+
+}
+
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum TokenKind {
-    LParen,
-    RParen,
-    LBrace,
-    RBrace,
-    LBracket,
-    RBracket,
-    LAngle,
-    RAngle,
+    Directive(String),
+    Label(String),
+
+    
 
     Add,
     Sub,
@@ -84,7 +102,7 @@ pub enum TokenKind {
 
     Let,
     Sizeof,
-    Init,
+    New,
     Defer,
     While,
     Else,
@@ -525,7 +543,7 @@ impl<'a> Iterator for Lexer<'a> {
             Some('e') if self.matches("lse") => TokenKind::Else,
             Some('l') if self.matches("et") => TokenKind::Let,
             Some('s') if self.matches("izeof") => TokenKind::Sizeof,
-            Some('i') if self.matches("nit") => TokenKind::Init,
+            Some('n') if self.matches("ew") => TokenKind::New,
             Some('r') if self.matches("eturn") => TokenKind::Return,
             Some('b') if self.matches("reak") => TokenKind::Break,
             Some('c') if self.matches("ontinue") => TokenKind::Continue,

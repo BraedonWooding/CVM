@@ -192,6 +192,36 @@ impl<'a> Transpiler<'a> {
         }
     }
 
+    fn transpile_initialiser_list(&mut self, vals: &[Initialiser]) {
+        for val in vals.iter() {
+            self.transpile_initialiser(val);
+            self.builder += ", "; // add's superfluous comment...
+            // TODO: ^^ Fix for singular values and have flag for
+            //       non singular (i.e. (int) { 1 } compared to
+            //       (int) { 1, } and ... so on)
+        }
+    }
+
+    fn transpile_initialiser(&mut self, init: &Initialiser) {
+        match init {
+            Initialiser::Key{key, val: vals} => {
+                self.builder += &format!(".{} = ", **key);
+                // Technically we don't require braces around scalar initialiser
+                // and most compilers warn if they are defined (sadly)
+                // (they aren't illegal in C though and are technically fine)
+                // however I don't currently care about fixing this since it
+                // requires us to do a bunch of random type stuff which I don't
+                // really wanna do rn, this can fixed later @TODO @SCALAR_INIT
+                self.builder += "{ ";
+                self.transpile_initialiser_list(vals);
+                self.builder += " }";
+            },
+            Initialiser::Val{val} => {
+                self.transpile_expr(val);
+            }
+        }
+    }
+
     fn transpile_expr(&mut self, expr: &Expr) {
         match &*expr.kind {
             ExprKind::Assign { lhs, rhs, kind } => {
@@ -219,9 +249,29 @@ impl<'a> Transpiler<'a> {
                     }
                 }
             }
-            ExprKind::New(..) => {
-                // TODO
-                self.builder += "???";
+            ExprKind::Init(ty, inits) => {
+                let ty = if let ParsedType::Pointer(_) = ty {
+                    warn!("Can't initialise pointers due to potential misunderstanding around mallocs");
+                    // TODO: This shouldn't exist here...
+                    self.builder += "???";
+                    return;
+                } else {
+                    ty
+                };
+
+                // We can just do a standard initialisation
+                // @TODO: We can also fix the case of scalar initialisers
+                //        here by just writing the literal instead of
+                //        doing a bizarre case
+                // HOWEVER: this isn't always true...
+                //          for example you can take a reference to a 'new'
+                //          / scalar initaliser but not to a literal value
+                // @SCALAR_INIT
+                self.builder += "(";
+                self.transpile_type(ty, TypeOpts::empty());
+                self.builder += ") { ";
+                self.transpile_initialiser_list(inits);
+                self.builder += " }";
             }
             ExprKind::Unary(kinds, expr) => {
                 for kind in kinds.as_slice() {
