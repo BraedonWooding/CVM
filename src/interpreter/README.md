@@ -2,6 +2,36 @@
 
 ## Bytecode / IR Examples
 
+Our bytecode is very similar to MIPS (it's just easier to generate) with a few exceptions
+
+It also is intended to be very human writeable and does a huge amount of the annoying work for you (while also forcing you to do good assembly standards)
+
+### Machine Independent Code
+
+Instead of using explicit byte offsets we use variable byte offsets that are encoded upon loading into an interpreter.  We also have more explicit function frames.
+
+You'll often see that this means that MIPS uses i32 (signed integer of 32 bits exactly) explicitly in a lot of places.
+
+An example of a function is;
+
+```mips
+# In MIPS using PIC
+foo:
+    # our MIPS loader doesn't currently reorder so this isn't really relevant
+    # but almost all MIPS assemblers do so for consistency I'll always include
+    # them in examples where PIC is used.
+    .set      noreorder
+    .cpload   $t9
+    .set      reorder
+    subu      $sp, 4
+    .frame    
+    jr        $ra
+
+
+```
+
+
+
 ```c
 // == Alignment Example ==
 // Also note: alignas(double) == align(alignof(double))

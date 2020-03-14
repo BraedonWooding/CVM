@@ -4,6 +4,12 @@ use log::warn;
 use crate;
 use mips::*;
 
+/*
+    This is a different sort of parser effectively we are just going to
+    do the transformation to IR / bytecode as we go instead of trying to create
+    an AST, this is typically called an assembler in this context :)
+ */
+
 #[derive(Debug, Clone)]
 pub struct ErrorToken {
     text: String,
@@ -52,105 +58,18 @@ pub enum Directives {
 
 }
 
-#[derive(Debug, Clone, PartialEq, EnumAsInner)]
-pub enum TokenKind {
-    Directive(String),
-    Label(String),
-
-    
-
-    Add,
-    Sub,
-    Asterix,
-    Mod,
-    Div,
-
-    BitNot,
-    BitAnd,
-    BitOr,
-    BitXor,
-    LShift,
-    RShift,
-
-    Assign,
-    AddAssign,
-    SubAssign,
-    MulAssign,
-    ModAssign,
-    DivAssign,
-    LShiftAssign,
-    RShiftAssign,
-    BitAndAssign,
-    BitOrAssign,
-    BitXorAssign,
-
-    GreaterEqual,
-    LessEqual,
-    Not,
-    Equal,
-    NotEqual,
-    BoolAnd,
-    BoolOr,
-
-    Colon,
-    SemiColon,
-    Period,
-    Comma,
-    Uninitialised,
-    Arrow,
-    FatArrow,
-
-    Let,
-    Sizeof,
-    New,
-    Defer,
-    While,
-    Else,
-    If,
-    For,
-    Function,
-    Lambda,
-    Struct,
-    Enum, // TODO
-    Cast,
-    Null,
-    Return,
-    Break,
-    Continue,
-    Is,
-
-    Ident(String),
-    Character(char),
-    Str(String),
-    Number(String, Postfix),
-    Bool(bool),
-}
-
 #[derive(Clone)]
-pub struct Lexer<'a> {
+pub struct Parser<'a> {
     pub line: usize,
     pub col: usize,
     pub byte_offset: usize,
     chars: std::iter::Peekable<std::str::Chars<'a>>,
 }
 
-pub trait TokenIterator<'a>: std::iter::Iterator<Item = &'a Token> {
-    fn peek(&mut self) -> Option<&'a Token>;
-}
-
-impl<'a, I> TokenIterator<'a> for std::iter::Peekable<I>
-where
-    I: Iterator<Item = &'a Token>,
-{
-    fn peek(&mut self) -> Option<&'a Token> {
-        self.peek().map(|t| *t)
-    }
-}
-
-impl<'a> Lexer<'a> {
-    pub fn new(chars: &'a str) -> Lexer<'a> {
+impl<'a> Parser<'a> {
+    pub fn new(chars: &'a str) -> Parser<'a> {
         // Lines / Cols start at 1
-        Lexer {
+        Parser {
             line: 1,
             col: 1,
             byte_offset: 0,
@@ -300,6 +219,9 @@ impl<'a> Lexer<'a> {
 
     // Won't work if you try to match it to something that contains a newline
     fn matches(&mut self, to: &str) -> bool {
+        // NOTE: This isn't going to be slow despite it having to clone iterator
+        //       effectively on most systems is just going to result in a clone
+        //       of a file pointer (i.e. dup2 or whatever)
         let chars = self.chars.clone();
         let mut to_chars = to.chars().peekable();
         while to_chars.peek().is_some() {
@@ -310,6 +232,7 @@ impl<'a> Lexer<'a> {
         }
 
         // we have to make sure the next character isn't a valid identifier
+        // else we'll too eagerly match!
         match self.chars.peek() {
             Some(c) if Self::valid_identifier_continuer(*c) => {
                 self.chars = chars;
@@ -368,7 +291,7 @@ impl ErrorToken {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl<'a> Iterator for Parser<'a> {
     type Item = Result<Token, ErrorToken>;
 
     fn next(&mut self) -> Option<Self::Item> {

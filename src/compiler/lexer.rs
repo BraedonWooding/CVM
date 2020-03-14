@@ -282,6 +282,9 @@ impl<'a> Lexer<'a> {
 
     // Won't work if you try to match it to something that contains a newline
     fn matches(&mut self, to: &str) -> bool {
+        // NOTE: This isn't going to be slow despite it having to clone iterator
+        //       effectively on most systems is just going to result in a clone
+        //       of a file pointer (i.e. dup2 or whatever)
         let chars = self.chars.clone();
         let mut to_chars = to.chars().peekable();
         while to_chars.peek().is_some() {
@@ -292,6 +295,7 @@ impl<'a> Lexer<'a> {
         }
 
         // we have to make sure the next character isn't a valid identifier
+        // else we'll too eagerly match!
         match self.chars.peek() {
             Some(c) if Self::valid_identifier_continuer(*c) => {
                 self.chars = chars;
